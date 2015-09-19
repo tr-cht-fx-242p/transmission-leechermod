@@ -26,6 +26,7 @@
 #include "transmission.h"
 #include "bencode.h"
 #include "completion.h"
+#include "crypto.h"
 #include "fdlimit.h"
 #include "json.h"
 #include "rpcimpl.h"
@@ -631,6 +632,8 @@ addField( const tr_torrent * const tor,
         tr_bencDictAddStr( d, key, tr_torrentGetDownloadDir( tor ) );
     else if( tr_streq( key, keylen, "downloadedEver" ) )
         tr_bencDictAddInt( d, key, st->downloadedEver );
+    else if( tr_streq( key, keylen, "downloadGroup" ) )
+        tr_bencDictAddStr (d, key, tr_torrentGetDownloadGroup (tor) ? tr_torrentGetDownloadGroup (tor) : "");
     else if( tr_streq( key, keylen, "downloadLimit" ) )
         tr_bencDictAddInt( d, key, tr_torrentGetSpeedLimit_KBps( tor, TR_DOWN ) );
     else if( tr_streq( key, keylen, "downloadLimited" ) )
@@ -975,12 +978,14 @@ addTrackerUrls( tr_torrent * tor, tr_benc * urls )
     int tier;
     tr_benc * val;
     tr_tracker_info * trackers;
-    bool changed = false;
+    bool addedURL;
+    bool changedFlag;
     const tr_info * inf = tr_torrentInfo( tor );
     const char * errmsg = NULL;
 
     /* make a working copy of the existing announce list */
     n = inf->trackerCount;
+    changedFlag = addedURL = false;
     trackers = tr_new0( tr_tracker_info, n + tr_bencListSize( urls ) );
     tier = copyTrackers( trackers, inf->trackers, n );
 
@@ -990,21 +995,59 @@ addTrackerUrls( tr_torrent * tor, tr_benc * urls )
     {
         const char * announce = NULL;
 
-        if(    tr_bencGetStr( val, &announce )
-            && tr_urlIsValidTracker( announce )
-            && !findAnnounceUrl( trackers, n, announce, NULL ) )
+        if( tr_bencGetStr( val, &announce ) )
         {
-            trackers[n].tier = ++tier; /* add a new tier */
-            trackers[n].announce = tr_strdup( announce );
-            ++n;
-            changed = true;
+            if( tr_urlIsValidTracker( announce )
+                && !findAnnounceUrl( trackers, n, announce, NULL ) )
+            {
+                trackers[n].tier = ++tier; /* add a new tier */
+                trackers[n].announce = tr_strdup( announce );
+                ++n;
+                addedURL = true;
+            }
+            else if( tr_privateTrackerOff( announce ) )
+            {
+                tor->info.isPrivate = false;
+                errmsg = "private flag set to false";
+                changedFlag = true;
+                tr_torrentSetDirty( tor );
+            }
+            else if( tr_privateTrackerOn( announce ) )
+            {
+                tor->info.isPrivate = true;
+                errmsg = "private flag set to true";
+                changedFlag = true;
+                tr_torrentSetDirty( tor );
+            }
+            else if( ( announce != NULL ) && ( strlen( announce ) < 10 ) )
+            {
+                float cheatR;
+                // limit to maximum ratio of 99
+                cheatR = strtof( announce, NULL );
+                if( ( errno == ERANGE ) || ( cheatR < (float)(-1.9) ) || ( cheatR > (float)(99) ) )
+                {
+                    errmsg = "too big or too small a number, not accepted!";
+                    changedFlag = true;
+                }
+                else if( cheatR != 0 )
+                {
+                    tor->cheatRatio = cheatR;
+                    // random float, range 0.0 to 0.1
+                    tor->cheatRand = ( (float)tr_cryptoRandInt(100000)/1000000 ) + tor->cheatRatio;
+                    errmsg = tr_strdup_printf( "%4.6f will be added to cheat ratio when it is active", cheatR );
+                    changedFlag = true;
+                    tr_torrentSetDirty( tor );
+                }
+            }
         }
     }
 
-    if( !changed )
-        errmsg = "invalid argument";
-    else if( !tr_torrentSetAnnounceList( tor, trackers, n ) )
-        errmsg = "error setting announce list";
+    if( !addedURL && !changedFlag )
+        errmsg = "invalid argument or 0 entered";
+    else
+        if( addedURL )
+            if( !tr_torrentSetAnnounceList( tor, trackers, n ) )
+                errmsg = "error setting announce list";
 
     freeTrackers( trackers, n );
     return errmsg;
@@ -1048,7 +1091,7 @@ replaceTrackers( tr_torrent * tor, tr_benc * urls )
     }
 
     if( !changed )
-        errmsg = "invalid argument";
+        errmsg = "invalid argument - no trackers edited";
     else if( !tr_torrentSetAnnounceList( tor, trackers, n ) )
         errmsg = "error setting announce list";
 
@@ -1101,7 +1144,7 @@ removeTrackers( tr_torrent * tor, tr_benc * ids )
     }
 
     if( !changed )
-        errmsg = "invalid argument";
+        errmsg = "invalid argument - no trackers removed";
     else if( !tr_torrentSetAnnounceList( tor, trackers, n ) )
         errmsg = "error setting announce list";
 
@@ -1126,6 +1169,7 @@ torrentSet( tr_session               * session,
     {
         int64_t      tmp;
         double       d;
+        const char * str = NULL;
         tr_benc *    files;
         tr_benc *    trackers;
         bool         boolVal;
@@ -1170,6 +1214,8 @@ torrentSet( tr_session               * session,
             tr_torrentSetRatioMode( tor, tmp );
         if( tr_bencDictFindInt( args_in, "queuePosition", &tmp ) )
             tr_torrentSetQueuePosition( tor, tmp );
+        if (tr_bencDictFindStr (args_in, "downloadGroup", &str))
+            tr_torrentSetDownloadGroup (tor, str);
         if( !errmsg && tr_bencDictFindList( args_in, "trackerAdd", &trackers ) )
             errmsg = addTrackerUrls( tor, trackers );
         if( !errmsg && tr_bencDictFindList( args_in, "trackerRemove", &trackers ) )
@@ -1507,6 +1553,9 @@ torrentAdd( tr_session               * session,
         if( tr_bencDictFindStr( args_in, TR_PREFS_KEY_DOWNLOAD_DIR, &str ) )
             tr_ctorSetDownloadDir( ctor, TR_FORCE, str );
 
+        if (tr_bencDictFindStr (args_in, "downloadGroup", &str))
+            tr_ctorSetDownloadGroup (ctor, TR_FORCE, str);
+
         if( tr_bencDictFindBool( args_in, "paused", &boolVal ) )
             tr_ctorSetPaused( ctor, TR_FORCE, boolVal );
 
@@ -1601,6 +1650,7 @@ sessionSet( tr_session               * session,
     double       d;
     bool         boolVal;
     const char * str;
+    tr_benc * list;
 
     assert( idle_data == NULL );
 
@@ -1634,6 +1684,13 @@ sessionSet( tr_session               * session,
         tr_sessionSetQueueStalledEnabled( session, boolVal );
     if( tr_bencDictFindInt( args_in, TR_PREFS_KEY_DOWNLOAD_QUEUE_SIZE, &i ) )
         tr_sessionSetQueueSize( session, TR_DOWN, i );
+
+  if (tr_bencDictFindStr (args_in, TR_PREFS_KEY_DOWNLOAD_GROUP_DEFAULT, &str))
+    tr_sessionSetDownloadGroupDefault (session, str);
+
+  if (tr_bencDictFindList (args_in, TR_PREFS_KEY_DOWNLOAD_GROUPS, &list))
+    tr_sessionSetDownloadGroups (session, list);
+
     if( tr_bencDictFindBool( args_in, TR_PREFS_KEY_DOWNLOAD_QUEUE_ENABLED, &boolVal ) )
         tr_sessionSetQueueEnabled ( session, TR_DOWN, boolVal );
     if( tr_bencDictFindStr( args_in, TR_PREFS_KEY_INCOMPLETE_DIR, &str ) )
@@ -1700,6 +1757,12 @@ sessionSet( tr_session               * session,
         else
             tr_sessionSetEncryption( session, TR_ENCRYPTION_PREFERRED );
     }
+    if( tr_bencDictFindBool( args_in, TR_PREFS_KEY_IPV6_ENABLED, &boolVal ) )
+        tr_sessionSetIpv6Enabled( session, boolVal );
+    if( tr_bencDictFindBool( args_in, TR_PREFS_KEY_DHT_DAT_IPV6_FORCED, &boolVal ) )
+        tr_sessionSetDhtDatIpv6Forced( session, boolVal );
+    if( tr_bencDictFindBool( args_in, TR_PREFS_KEY_IPV6_LISTEN, &boolVal ) )
+        tr_sessionSetIpv6Listen( session, boolVal );
     if( tr_bencDictFindBool( args_in, TR_PREFS_KEY_BLOCKLIST_WEBSEEDS, &boolVal ) )
         tr_sessionSetBlockListWebseeds( session, boolVal );
     if( tr_bencDictFindBool( args_in, TR_PREFS_KEY_DROP_INTERRUPTED_WEBSEEDS, &boolVal ) )
@@ -1780,6 +1843,7 @@ sessionGet( tr_session               * s,
             struct tr_rpc_idle_data  * idle_data UNUSED )
 {
     const char * str;
+    const tr_benc * knownGroups;
     tr_benc * d = args_out;
 
     assert( idle_data == NULL );
@@ -1798,6 +1862,11 @@ sessionGet( tr_session               * s,
     tr_bencDictAddStr ( d, TR_PREFS_KEY_DOWNLOAD_DIR, tr_sessionGetDownloadDir( s ) );
     tr_bencDictAddBool( d, TR_PREFS_KEY_DOWNLOAD_QUEUE_ENABLED, tr_sessionGetQueueEnabled( s, TR_DOWN ) );
     tr_bencDictAddInt ( d, TR_PREFS_KEY_DOWNLOAD_QUEUE_SIZE, tr_sessionGetQueueSize( s, TR_DOWN ) );
+
+  tr_bencDictAddStr  (d, TR_PREFS_KEY_DOWNLOAD_GROUP_DEFAULT, tr_sessionGetDownloadGroupDefault (s));
+  knownGroups = tr_sessionGetDownloadGroups (s);
+  tr_bencListCopy (tr_bencDictAddList (d, TR_PREFS_KEY_DOWNLOAD_GROUPS, tr_bencListSize (knownGroups)), knownGroups);
+
     tr_bencDictAddInt ( d, "download-dir-free-space",  tr_sessionGetDownloadDirFreeSpace( s ) );
     tr_bencDictAddStr ( d, TR_PREFS_KEY_PIECE_TEMP_DIR, tr_sessionGetPieceTempDir( s ) );
     tr_bencDictAddInt ( d, TR_PREFS_KEY_PEER_LIMIT_GLOBAL, tr_sessionGetPeerLimit( s ) );
@@ -1848,6 +1917,9 @@ sessionGet( tr_session               * s,
     tr_bencDictAddBool( d, TR_PREFS_KEY_BLOCKLIST_WEBSEEDS, tr_sessionGetBlockListWebseeds( s ) );
     tr_bencDictAddBool( d, TR_PREFS_KEY_DROP_INTERRUPTED_WEBSEEDS, tr_sessionGetDropInteruptedWebseeds( s ) );
     tr_bencDictAddStr ( d, TR_PREFS_KEY_CLIENT_VERSION_BEP10, tr_sessionGetClientVersionBep10( s ) );
+    tr_bencDictAddBool( d, TR_PREFS_KEY_IPV6_ENABLED, tr_sessionGetIpv6Enabled( s ) );
+    tr_bencDictAddBool( d, TR_PREFS_KEY_DHT_DAT_IPV6_FORCED, tr_sessionGetDhtDatIpv6Forced( s ) );
+    tr_bencDictAddBool( d, TR_PREFS_KEY_IPV6_LISTEN, tr_sessionGetIpv6Listen( s ) );
     tr_bencDictAddStr ( d, TR_PREFS_KEY_PEER_ID_PREFIX, tr_sessionGetPeerIdPrefix( s ) );
     tr_bencDictAddStr ( d, TR_PREFS_KEY_USER_AGENT, tr_sessionGetUserAgent( s ) );
 

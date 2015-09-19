@@ -290,7 +290,10 @@ tr_torrentGetStreamingMode( const tr_torrent * tor )
 {
     assert( tr_isTorrent( tor ) );
 
-    return tor->streamingMode;
+    if( tor->info.webseedCount > 0 )
+        return TR_STREAMING_FORCED;
+    else
+        return tor->streamingMode;
 }
 
 void
@@ -928,6 +931,7 @@ torrentCallScript( const tr_torrent * tor, const char * script )
             tr_strdup_printf( "TR_APP_VERSION=%s", SHORT_VERSION_STRING ),
             tr_strdup_printf( "TR_TIME_LOCALTIME=%s", timeStr ),
             tr_strdup_printf( "TR_TORRENT_DIR=%s", tor->currentDir ),
+            tr_strdup_printf ("TR_TORRENT_GROUP=%s", tr_torrentGetDownloadGroup (tor)),
             tr_strdup_printf( "TR_TORRENT_ID=%d", tr_torrentId( tor ) ),
             tr_strdup_printf( "TR_TORRENT_HASH=%s", tor->info.hashString ),
             tr_strdup_printf( "TR_TORRENT_NAME=%s", tr_torrentName( tor ) ),
@@ -1001,6 +1005,7 @@ torrentInit( tr_torrent * tor, const tr_ctor * ctor )
     int doStart;
     uint64_t loaded;
     const char * dir;
+    const char * group;
     bool isNewTorrent;
     struct stat st;
     static int nextUniqueId = 1;
@@ -1036,6 +1041,13 @@ torrentInit( tr_torrent * tor, const tr_ctor * ctor )
     s = tr_metainfoGetBasename( &tor->info );
     tor->pieceTempDir = tr_buildPath( tr_sessionGetPieceTempDir( tor->session ), s, NULL );
     tr_free( s );
+
+  if (!tr_ctorGetDownloadGroup (ctor, TR_FORCE, &group) ||
+    !tr_ctorGetDownloadGroup (ctor, TR_FALLBACK, &group))
+  {
+      tor->downloadGroup = tr_strdup (group);
+  }
+
 
     tr_bandwidthConstruct( &tor->bandwidth, session, &session->bandwidth );
 
@@ -1128,8 +1140,15 @@ torrentInit( tr_torrent * tor, const tr_ctor * ctor )
     {
         tr_torrentSetCheatMode( tor, tor->session->cheatModeDefault );
     }
+
+    if( !( loaded & TR_FR_CHEAT_RATIO )
+        || ( tor->cheatRatio < (float)(-1.9) ) || ( tor->cheatRatio > (float)(99) ) )
+    {
+        tor->cheatRatio = 0;
+    }
+
     // random float, range 0.0 to 0.1
-    tor->cheatRand = (float)tr_cryptoRandInt(100000)/1000000;
+    tor->cheatRand = ( (float)tr_cryptoRandInt(100000)/1000000 ) + tor->cheatRatio;
 
     /* add the torrent to tr_session.torrentList */
     session->torrentCount++;
@@ -1276,6 +1295,29 @@ tr_torrentNew( const tr_ctor * ctor, int * setmeError )
 /**
 ***
 **/
+
+ void
+tr_torrentSetDownloadGroup (tr_torrent * tor, const char * group)
+{
+  assert (tr_isTorrent (tor));
+
+  if (!group || !tor->downloadGroup || strcmp (group, tor->downloadGroup))
+    {
+      tr_free (tor->downloadGroup);
+      tor->downloadGroup = tr_strdup (group);
+      tor->anyDate = tr_time ();
+      tr_torrentSetDirty (tor);
+    }
+}
+
+const char*
+tr_torrentGetDownloadGroup (const tr_torrent * tor)
+{
+  assert (tr_isTorrent (tor));
+
+  return tor->downloadGroup;
+}
+
 
 void
 tr_torrentSetDownloadDir( tr_torrent * tor, const char * path )
@@ -2094,23 +2136,36 @@ setExistingFilesVerified( tr_torrent * tor )
     tr_piece_index_t pi;
     const tr_info * info = tr_torrentInfo( tor );
     bool * missing = tr_new0( bool, info->pieceCount );
+    tr_cheatMode_t cheatMode = tr_torrentGetCheatMode( tor );
 
-    for( fi = 0; fi < info->fileCount; ++fi  )
+    if(cheatMode == TR_CHEAT_ALWSEED)
     {
-        const tr_file * file = &info->files[fi];
-        const bool have = !file->dnd
-            && tr_torrentFindFile2( tor, fi, NULL, NULL, NULL );
+        for( pi = 0; pi < info->pieceCount; ++pi )
+        {
+            tr_torrentSetHasPiece( tor, pi, true );
+            tr_torrentSetPieceChecked( tor, pi );
+        }
+    }
+    else
+    {
+        for( fi = 0; fi < info->fileCount; ++fi  )
+        {
+            const tr_file * file = &info->files[fi];
+            const bool have = !file->dnd
+                && tr_torrentFindFile2( tor, fi, NULL, NULL, NULL );
 
-        for( pi = file->firstPiece; pi <= file->lastPiece; ++pi )
-            if( !missing[pi] && !have )
-                missing[pi] = true;
+            for( pi = file->firstPiece; pi <= file->lastPiece; ++pi )
+                if( !missing[pi] && !have )
+                    missing[pi] = true;
+        }
+
+        for( pi = 0; pi < info->pieceCount; ++pi )
+        {
+            tr_torrentSetHasPiece( tor, pi, !missing[pi] );
+            tr_torrentSetPieceChecked( tor, pi );
+        }
     }
 
-    for( pi = 0; pi < info->pieceCount; ++pi )
-    {
-        tr_torrentSetHasPiece( tor, pi, !missing[pi] );
-        tr_torrentSetPieceChecked( tor, pi );
-    }
     tr_free( missing );
 }
 
@@ -2741,6 +2796,14 @@ setFileDND( tr_torrent * tor, tr_file_index_t file_index, int8_t dnd )
     rwfpmovept = fpmovept;
     rwlpmovept = lpmovept;
 
+    // eliminate compiler warnings - may be used uninitialized in this function
+    fpoffset = 0;
+    fpoverlap = 0;
+    fpbuf = NULL;
+//  lpoffset = 0;
+    lpoverlap = 0;
+    lpbuf = NULL;
+
     if( fpmovept )
     {
         char * filename = tr_torrentFindPieceTemp( tor, fpindex );
@@ -3141,6 +3204,7 @@ tr_torrentGetFileMTime( const tr_torrent * tor, tr_file_index_t i )
 {
     time_t mtime = 0;
     tr_fd_index_type it;
+    it = TR_FD_INDEX_FILE;
     if( !tr_fdFileGetCachedMTime( tor->session, tor->uniqueId, i, it, &mtime ) )
         tr_torrentFindFile2( tor, i, NULL, NULL, &mtime );
     return mtime;

@@ -251,21 +251,26 @@ open_incoming_peer_port( tr_session * session )
     /* bind an ipv4 port to listen for incoming peers... */
     b = session->public_ipv4;
     b->socket = tr_netBindTCP( &b->addr, session->private_peer_port, false );
+    tr_dbg( "trying to opening ipv4 listening port" );
     if( b->socket >= 0 ) {
         b->ev = event_new( session->event_base, b->socket, EV_READ | EV_PERSIST, accept_incoming_peer, session );
         event_add( b->ev, NULL );
+        tr_dbg( "opened ipv4 listening port" );
     }
 
     /* and do the exact same thing for ipv6, if it's supported... */
- /*    if( tr_net_hasIPv6( session->private_peer_port ) ) {
-        b = session->public_ipv6;
-        b->socket = tr_netBindTCP( &b->addr, session->private_peer_port, false );
-        if( b->socket >= 0 ) {
-            b->ev = event_new( session->event_base, b->socket, EV_READ | EV_PERSIST, accept_incoming_peer, session );
-            event_add( b->ev, NULL );
+    if( tr_sessionGetIpv6Enabled( session ) && tr_sessionGetIpv6Listen( session ) ) {
+        tr_dbg( "trying to opening ipv6 listening port" );
+        if( tr_net_hasIPv6( session->private_peer_port ) ) {
+            b = session->public_ipv6;
+            b->socket = tr_netBindTCP( &b->addr, session->private_peer_port, false );
+            if( b->socket >= 0 ) {
+                b->ev = event_new( session->event_base, b->socket, EV_READ | EV_PERSIST, accept_incoming_peer, session );
+                event_add( b->ev, NULL );
+                tr_dbg( "opened ipv6 listening port" );
+            }
         }
     }
- Disabled ipv6 SRS 06-01-2012 */
 }
 
 const tr_address*
@@ -357,11 +362,19 @@ format_tos(int value)
 void
 tr_sessionGetDefaultSettings( tr_benc * d )
 {
+
+    const tr_benc * knownGroups;
+
     assert( tr_bencIsDict( d ) );
 
-    tr_bencDictReserve( d, 77 );
+    tr_bencDictReserve( d, 86);
     tr_bencDictAddBool( d, TR_PREFS_KEY_BLOCKLIST_ENABLED,               false );
     tr_bencDictAddBool( d, TR_PREFS_KEY_BLOCKLIST_WEBSEEDS,              false );
+    tr_bencDictAddBool( d, TR_PREFS_KEY_IPV6_ENABLED,                    false );
+    tr_bencDictAddBool( d, TR_PREFS_KEY_DHT_DAT_IPV6_FORCED,             false );
+    tr_bencDictAddBool( d, TR_PREFS_KEY_IPV6_LISTEN,                    false );
+    tr_bencDictAddStr ( d, TR_PREFS_KEY_DIR_WATCH,                       "" );
+    tr_bencDictAddBool( d, TR_PREFS_KEY_DIR_WATCH_ENABLED,               false );
     tr_bencDictAddBool( d, TR_PREFS_KEY_DROP_INTERRUPTED_WEBSEEDS,       true );
     tr_bencDictAddStr ( d, TR_PREFS_KEY_BLOCKLIST_URL,                   "http://www.example.com/blocklist" );
     tr_bencDictAddInt ( d, TR_PREFS_KEY_MAX_CACHE_SIZE_MB,               DEFAULT_CACHE_SIZE_MB );
@@ -437,16 +450,27 @@ tr_sessionGetDefaultSettings( tr_benc * d )
     tr_bencDictAddStr ( d, TR_PREFS_KEY_CLIENT_VERSION_BEP10,            "" );
     tr_bencDictAddStr ( d, TR_PREFS_KEY_PEER_ID_PREFIX,                  "" );
     tr_bencDictAddStr ( d, TR_PREFS_KEY_USER_AGENT,                      "" );
+
+  tr_bencDictAddStr  (d, TR_PREFS_KEY_DOWNLOAD_GROUP_DEFAULT,          tr_getDefaultDownloadGroupDefault ());
+  knownGroups = tr_getDefaultDownloadGroups ();
+  tr_bencListCopy (tr_bencDictAddList (d, TR_PREFS_KEY_DOWNLOAD_GROUPS, tr_bencListSize (knownGroups)), knownGroups);
+
 }
 
 void
 tr_sessionGetSettings( tr_session * s, struct tr_benc * d )
 {
+
+    const tr_benc * knownGroups;
+
     assert( tr_bencIsDict( d ) );
 
-    tr_bencDictReserve( d, 78 );
+    tr_bencDictReserve( d, 85 );
     tr_bencDictAddBool( d, TR_PREFS_KEY_BLOCKLIST_ENABLED,                tr_blocklistIsEnabled( s ) );
     tr_bencDictAddBool( d, TR_PREFS_KEY_BLOCKLIST_WEBSEEDS,               s->blockListWebseeds );
+    tr_bencDictAddBool( d, TR_PREFS_KEY_IPV6_ENABLED,                     s->ipv6Enabled );
+    tr_bencDictAddBool( d, TR_PREFS_KEY_DHT_DAT_IPV6_FORCED,              s->dhtDatIpv6Forced );
+    tr_bencDictAddBool( d, TR_PREFS_KEY_IPV6_LISTEN,                      s->ipv6Listen );
     tr_bencDictAddBool( d, TR_PREFS_KEY_DROP_INTERRUPTED_WEBSEEDS,        s->dropInterruptedWebseeds );
     tr_bencDictAddStr ( d, TR_PREFS_KEY_BLOCKLIST_URL,                    tr_blocklistGetURL( s ) );
     tr_bencDictAddInt ( d, TR_PREFS_KEY_MAX_CACHE_SIZE_MB,                tr_sessionGetCacheLimit_MB( s ) );
@@ -523,6 +547,11 @@ tr_sessionGetSettings( tr_session * s, struct tr_benc * d )
     tr_bencDictAddStr ( d, TR_PREFS_KEY_CLIENT_VERSION_BEP10,             tr_sessionGetClientVersionBep10( s ) );
     tr_bencDictAddStr ( d, TR_PREFS_KEY_PEER_ID_PREFIX,                   tr_sessionGetPeerIdPrefix( s ) );
     tr_bencDictAddStr ( d, TR_PREFS_KEY_USER_AGENT,                       tr_sessionGetUserAgent( s ) );
+
+  tr_bencDictAddStr  (d, TR_PREFS_KEY_DOWNLOAD_GROUP_DEFAULT,       tr_sessionGetDownloadGroupDefault (s));
+  knownGroups = tr_sessionGetDownloadGroups (s);
+  tr_bencListCopy (tr_bencDictAddList (d, TR_PREFS_KEY_DOWNLOAD_GROUPS, tr_bencListSize (knownGroups)), knownGroups);
+
 }
 
 bool
@@ -836,6 +865,7 @@ sessionSetImpl( void * vdata )
     tr_session * session = data->session;
     tr_benc * settings = data->clientSettings;
     struct tr_turtle_info * turtle = &session->turtle;
+    tr_benc * groups;
 
     assert( tr_isSession( session ) );
     assert( tr_bencIsDict( settings ) );
@@ -893,6 +923,12 @@ sessionSetImpl( void * vdata )
         session->maxWebseeds = ( i > 0 ) ? i : 0 ;
     if( tr_bencDictFindBool( settings, TR_PREFS_KEY_BLOCKLIST_WEBSEEDS, &boolVal ) )
         session->blockListWebseeds = boolVal;
+    if( tr_bencDictFindBool( settings, TR_PREFS_KEY_IPV6_ENABLED, &boolVal ) )
+        session->ipv6Enabled = boolVal;
+    if( tr_bencDictFindBool( settings, TR_PREFS_KEY_DHT_DAT_IPV6_FORCED, &boolVal ) )
+        session->dhtDatIpv6Forced = boolVal;
+    if( tr_bencDictFindBool( settings, TR_PREFS_KEY_IPV6_LISTEN, &boolVal ) )
+        session->ipv6Listen = boolVal;
     if( tr_bencDictFindBool( settings, TR_PREFS_KEY_DROP_INTERRUPTED_WEBSEEDS, &boolVal ) )
         session->dropInterruptedWebseeds = boolVal;
     if( tr_bencDictFindStr( settings, TR_PREFS_KEY_CLIENT_VERSION_BEP10, &str ) )
@@ -901,6 +937,14 @@ sessionSetImpl( void * vdata )
         tr_sessionSetPeerIdPrefix( session, str );
     if( tr_bencDictFindStr( settings, TR_PREFS_KEY_USER_AGENT, &str ) )
         tr_sessionSetUserAgent( session, str );
+
+  if (tr_bencDictFindList (settings, TR_PREFS_KEY_DOWNLOAD_GROUPS, &groups))
+  {
+    tr_sessionSetDownloadGroups(session, groups);
+  }
+  if (tr_bencDictFindStr (settings, TR_PREFS_KEY_DOWNLOAD_GROUP_DEFAULT, &str))
+    tr_sessionSetDownloadGroupDefault (session, str);
+ 
 
     /* torrent queues */
     if( tr_bencDictFindInt( settings, TR_PREFS_KEY_QUEUE_STALLED_MINUTES, &i ) )
@@ -1110,6 +1154,55 @@ tr_sessionSetPieceTempDir( tr_session * session, const char * path )
     else
         session->pieceDir = tr_strdup( path );
     tr_sessionUnlock( session );
+}
+
+/***
+****
+***/
+
+ void
+tr_sessionSetDownloadGroups (tr_session * session, const tr_benc * groups)
+{
+  assert (tr_isSession (session));
+
+  tr_bencInitList (&session->downloadGroups, tr_bencListSize (groups));
+  tr_bencListCopy (&session->downloadGroups, groups);
+}
+
+const struct tr_benc*
+tr_sessionGetDownloadGroups (const tr_session * session)
+{
+  static tr_benc groups;
+
+  assert (tr_isSession (session));
+
+  tr_bencInitList (&groups, tr_bencListSize (&session->downloadGroups));
+  tr_bencListCopy (&groups, &session->downloadGroups);
+
+  return &groups;
+}
+
+void
+tr_sessionSetDownloadGroupDefault (tr_session * session, const char * defaultGroup)
+{
+  assert (tr_isSession (session));
+
+  session->downloadGroupDefault = tr_strdup (defaultGroup);
+}
+
+const char*
+tr_sessionGetDownloadGroupDefault (const tr_session * session)
+{
+  const char * defaultGroup = NULL;
+
+  assert (tr_isSession (session));
+
+  if (session->downloadGroupDefault != NULL)
+  {
+    defaultGroup = session->downloadGroupDefault;
+  }
+
+  return defaultGroup;
 }
 
 /***
@@ -2019,6 +2112,7 @@ tr_sessionClose( tr_session * session )
 
     /* free the session memory */
     tr_bencFree( &session->removedTorrents );
+    tr_bencFree (&session->downloadGroups);
     tr_bandwidthDestruct( &session->bandwidth );
     tr_bitfieldDestruct( &session->turtle.minutes );
     tr_lockFree( session->lock );
@@ -2812,6 +2906,57 @@ tr_sessionSetTorrentAddedScript( tr_session * session, const char * scriptFilena
 /****
 *****
 ****/
+
+void
+tr_sessionSetIpv6Enabled( tr_session * session, bool is_enabled )
+{
+    assert( tr_isSession( session ) );
+    assert( tr_isBool( is_enabled ) );
+
+    session->ipv6Enabled = is_enabled;
+}
+  
+bool
+tr_sessionGetIpv6Enabled( const tr_session * session )
+{
+    assert( tr_isSession( session ) );
+
+    return session->ipv6Enabled;
+}
+
+void
+tr_sessionSetIpv6Listen( tr_session * session, bool is_enabled )
+{
+    assert( tr_isSession( session ) );
+    assert( tr_isBool( is_enabled ) );
+
+    session->ipv6Listen = is_enabled;
+}
+  
+bool
+tr_sessionGetIpv6Listen( const tr_session * session )
+{
+    assert( tr_isSession( session ) );
+
+    return session->ipv6Listen;
+}
+
+void
+tr_sessionSetDhtDatIpv6Forced( tr_session * session, bool is_enabled )
+{
+    assert( tr_isSession( session ) );
+    assert( tr_isBool( is_enabled ) );
+
+    session->dhtDatIpv6Forced = is_enabled;
+}
+  
+bool
+tr_sessionGetDhtDatIpv6Forced( const tr_session * session )
+{
+    assert( tr_isSession( session ) );
+
+    return session->dhtDatIpv6Forced;
+}
 
 void
 tr_sessionSetBlockListWebseeds( tr_session * session, bool is_enabled )
