@@ -247,7 +247,7 @@ tr_netOpenPeerSocket( tr_session        * session,
             return -EINVAL;
         }
 
-        if( !tr_address_is_valid_for_peers( addr, port ) ) {
+        if( !tr_address_is_valid_for_peers( session, addr, port ) ) {
         tr_dbg( "Invalid Peer Address from peerIoReconnect %s:%d", tr_address_to_string( addr ), port );
             return -EINVAL;
         }
@@ -580,25 +580,29 @@ tr_globalAddress( int af, void *addr, int *addr_len )
 /* Return our global IPv6 address, with caching. */
 
 const unsigned char *
-tr_globalIPv6( void )
+tr_globalIPv6( const tr_session * session )
+//  enabled ipv6 CFP 09-02-2015 */
 {
- /*    static unsigned char ipv6[16];
-    static time_t last_time = 0;
-    static int have_ipv6 = 0;
-    const time_t now = tr_time( );
+    if( tr_sessionGetIpv6Enabled( session ) ) {
+        static unsigned char ipv6[16];
+        static time_t last_time = 0;
+        static int have_ipv6 = 0;
+        const time_t now = tr_time( );
 
-    * Re-check every half hour *
-    if( last_time < now - 1800 )
-    {
-        int addrlen = 16;
-        const int rc = tr_globalAddress( AF_INET6, ipv6, &addrlen );
-        have_ipv6 = ( rc >= 0 ) && ( addrlen == 16 );
-        last_time = now;
+//     Re-check every half hour
+        if( last_time < now - 1800 )
+        {
+            int addrlen = 16;
+            const int rc = tr_globalAddress( AF_INET6, ipv6, &addrlen );
+            have_ipv6 = ( rc >= 0 ) && ( addrlen == 16 );
+            last_time = now;
+        }
+
+        tr_deepLog( __FILE__, __LINE__, NULL, "Global IPv6 %d ", have_ipv6 );
+
+       return have_ipv6 ? ipv6 : NULL;
     }
-
-    return have_ipv6 ? ipv6 : NULL;
- Disabled ipv6 SRS 06-01-2012 */
-    return NULL;
+    else return NULL;
 }
 
 /***
@@ -643,13 +647,14 @@ isMartianAddr( const struct tr_address * a )
             const unsigned char * address = (const unsigned char*)&a->addr.addr6;
             return (address[0] == 0xFF) ||
                    (memcmp(address, zeroes, 15) == 0 &&
-                    (address[15] == 0 || address[15] == 1)) ||
-                   /* Addresses outside of 2000::/3 are currently reserved,
+                    (address[15] == 0 || address[15] == 1)); /*  ||
+                      Addresses outside of 2000::/3 are currently reserved,
                       but might be allocated at some future time. Since
                       there are a lot of buggy peers pushing around such
                       addresses over PEX, we reject them until the end of
-                      the 13th Baktun. */
+                      the 13th Baktun.
                    (tr_time() < 1356130800 && (address[0] & 0xE0) != 0x20);
+                   13th Baktun was over December 21, 2012 */
             break;
         }
 
@@ -659,12 +664,23 @@ isMartianAddr( const struct tr_address * a )
 }
 
 bool
-tr_address_is_valid_for_peers( const tr_address * addr, tr_port port )
+tr_address_is_valid_for_peers( const tr_session * session, const tr_address * addr, tr_port port )
 {
-    return ( addr->type != TR_AF_INET6 )
-        && ( port != 0 )
-        && ( tr_address_is_valid( addr ) )
-        && ( !isIPv6LinkLocalAddress( addr ) )
-        && ( !isIPv4MappedAddress( addr ) )
-        && ( !isMartianAddr( addr ) );
+    if( tr_sessionGetIpv6Enabled( session ) ) {
+
+        tr_deepLog( __FILE__, __LINE__, NULL, "Maybe PEER connection IPv6 %d ", 1 );
+
+        return (port != 0)
+            && (tr_address_is_valid (addr))
+            && (!isIPv6LinkLocalAddress (addr))
+            && (!isIPv4MappedAddress (addr))
+            && (!isMartianAddr (addr));
+    }
+
+    else return ( addr->type != TR_AF_INET6 )
+            && ( port != 0 )
+            && ( tr_address_is_valid( addr ) )
+            && ( !isIPv6LinkLocalAddress( addr ) )
+            && ( !isIPv4MappedAddress( addr ) )
+            && ( !isMartianAddr( addr ) );
 }

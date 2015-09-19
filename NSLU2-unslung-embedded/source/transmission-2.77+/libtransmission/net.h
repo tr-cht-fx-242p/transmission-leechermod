@@ -97,7 +97,8 @@ bool tr_address_from_sockaddr_storage( tr_address                     * setme,
 int tr_address_compare( const tr_address * a,
                         const tr_address * b );
 
-bool tr_address_is_valid_for_peers( const tr_address  * addr,
+bool tr_address_is_valid_for_peers( const tr_session * session,
+                                    const tr_address  * addr,
                                     tr_port             port );
 
 static inline bool
@@ -153,7 +154,7 @@ bool tr_net_hasIPv6( tr_port );
  */
 char* tr_net_strerror( char * buf, size_t buflen, int err );
 
-const unsigned char *tr_globalIPv6( void );
+const unsigned char *tr_globalIPv6( const tr_session * session );
 
 #if defined( WIN32) && !defined(QT_DLL)
 /* The QT exclusion is because something clashes whith the next include */

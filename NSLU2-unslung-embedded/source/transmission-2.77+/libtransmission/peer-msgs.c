@@ -7,7 +7,7 @@
  * This exemption does not extend to derived works not owned by
  * the Transmission project.
  *
- * $Id: peer-msgs.c 12921 2011-09-26 22:50:42Z jordan $
+ * $Id: peer-msgs.c 14550 2015-07-21 23:27:48Z jordan $
  */
 
 #include <assert.h>
@@ -15,6 +15,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h> /* INT_MAX */
 
 #include <alloca.h>
 
@@ -796,7 +797,7 @@ sendLtepHandshake( tr_peermsgs * msgs )
     bool allow_metadata_xfer;
     struct evbuffer * payload;
     struct evbuffer * out = msgs->outMessages;
-    const unsigned char * ipv6 = tr_globalIPv6();
+    const unsigned char * ipv6 = tr_globalIPv6( msgs->torrent->session );
 
     if( msgs->clientSentLtepHandshake )
         return;
@@ -827,7 +828,8 @@ sendLtepHandshake( tr_peermsgs * msgs )
         tr_bencDictAddInt( &val, "metadata_size", msgs->torrent->infoDictLength );
     tr_bencDictAddInt( &val, "p", tr_sessionGetPublicPeerPort( getSession(msgs) ) );
     tr_bencDictAddInt( &val, "reqq", REQQ );
-    tr_bencDictAddInt( &val, "upload_only", tr_torrentIsSeed( msgs->torrent ) );
+    tr_bencDictAddInt( &val, "upload_only", ( tr_torrentIsSeed( msgs->torrent )
+                                             || !tr_torrentIsPieceTransferAllowed( msgs->torrent, TR_PEER_TO_CLIENT ) ) );
 
     if( strlen( tr_sessionGetClientVersionBep10( msgs->torrent->session ) ) )
     {
@@ -1236,6 +1238,8 @@ peerMadeRequest( tr_peermsgs * msgs, const struct peer_request * req )
         dbgmsg( msgs, "rejecting request from choked peer" );
     else if( msgs->peer->pendingReqsToClient + 1 >= REQQ )
         dbgmsg( msgs, "rejecting request ... reqq is full" );
+    else if( !tr_torrentIsPieceTransferAllowed( msgs->torrent, TR_CLIENT_TO_PEER ) )
+        dbgmsg( msgs, "rejecting request for a piece because bandwidth-UP was set to zero by user." );
     else
         allow = true;
 
@@ -1376,7 +1380,7 @@ readBtMessage( tr_peermsgs * msgs, struct evbuffer * inbuf, size_t inlen )
     if( inlen < msglen )
         return READ_LATER;
 
-    if( msglen == SIZE_MAX )
+    if( msglen == INT_MAX )
     {
         dbgmsg( msgs, "bad packet - BT message #%d with a length of %d", (int)id, (int)msglen );
         fireError( msgs, EMSGSIZE );
@@ -1696,7 +1700,8 @@ updateDesiredRequestCount( tr_peermsgs * msgs )
     /* there are lots of reasons we might not want to request any blocks... */
     if( tr_torrentIsSeed( torrent ) || !tr_torrentHasMetadata( torrent )
                                     || msgs->peer->clientIsChoked
-                                    || !msgs->peer->clientIsInterested )
+                                    || !msgs->peer->clientIsInterested
+                                    || !tr_torrentIsPieceTransferAllowed( torrent, TR_PEER_TO_CLIENT ) )
     {
         msgs->desiredRequestCount = 0;
     }
@@ -1895,7 +1900,8 @@ fillOutputBuffer( tr_peermsgs * msgs, time_t now )
         --msgs->prefetchCount;
 
         if( requestIsValid( msgs, &req )
-            && tr_cpPieceIsComplete( &msgs->torrent->completion, req.index ) )
+            && tr_cpPieceIsComplete( &msgs->torrent->completion, req.index )
+            && tr_torrentIsPieceTransferAllowed( msgs->torrent, TR_CLIENT_TO_PEER ) )
         {
             int err;
             const uint32_t msglen = 4 + 1 + 4 + 4 + req.length;
@@ -1949,7 +1955,7 @@ fillOutputBuffer( tr_peermsgs * msgs, time_t now )
             protocolSendReject( msgs, &req );
         }
 
-        if( msgs != NULL )
+        if( ( msgs != NULL ) && tr_torrentIsPieceTransferAllowed( msgs->torrent, TR_CLIENT_TO_PEER ) )
             prefetchPieces( msgs );
     }
 
@@ -2391,7 +2397,7 @@ tr_peerMsgsNew( struct tr_torrent    * torrent,
     {
         /* Only send PORT over IPv6 when the IPv6 DHT is running (BEP-32). */
         const struct tr_address *addr = tr_peerIoGetAddress( peer->io, NULL );
-        if( addr->type == TR_AF_INET || tr_globalIPv6() ) {
+        if( addr->type == TR_AF_INET || tr_globalIPv6( torrent->session ) ) {
             protocolSendPort( m, tr_dhtPort( torrent->session ) );
         }
     }
