@@ -103,6 +103,9 @@ struct tr_turtle_info
 /** @brief handle to an active libtransmission session */
 struct tr_session
 {
+    bool                         ipv6Enabled;
+    bool                         dhtDatIpv6Forced;
+    bool                         ipv6Listen;
     bool                         isPortRandom;
     bool                         isPexEnabled;
     bool                         isDHTEnabled;
@@ -228,6 +231,9 @@ struct tr_session
     struct tr_announcer_udp    * announcer_udp;
 
     tr_benc                    * metainfoLookup;
+
+    tr_benc                      downloadGroups;
+    char *                       downloadGroupDefault;
 
     struct event               * nowTimer;
     struct event               * saveTimer;

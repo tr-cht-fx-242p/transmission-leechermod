@@ -940,7 +940,10 @@ letsCheat( const tr_tier * tier,
     }
     else if(cheatMode == TR_CHEAT_2RATIO) // report (download * 1.95 <=> 2.05) upload
     {
-        *up       = (int64_t)((1.95+tier->tor->cheatRand)*tier->byteCounts[TR_ANN_DOWN]);
+        float percentCheat = tr_cpPercentDone( &tier->tor->completion );
+        if( percentCheat > 1.0 ) percentCheat = 1.0;
+        else if( percentCheat < 0.01 ) percentCheat = 0.01;
+        *up       = (int64_t)(percentCheat*(1.95+tier->tor->cheatRand)*tier->byteCounts[TR_ANN_DOWN]);
         *down     = tier->byteCounts[TR_ANN_DOWN];
         *corrupt  = tier->byteCounts[TR_ANN_CORRUPT];
         *left     = tr_cpLeftUntilComplete( &tier->tor->completion );

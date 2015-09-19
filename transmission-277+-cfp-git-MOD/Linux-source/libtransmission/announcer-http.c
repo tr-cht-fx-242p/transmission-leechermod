@@ -108,7 +108,7 @@ announce_url_new( const tr_session * session, const tr_announce_request * req )
        announce twice. At any rate, we're already computing our IPv6
        address (for the LTEP handshake), so this comes for free. */
 
-    ipv6 = tr_globalIPv6( );
+    ipv6 = tr_globalIPv6( session );
     if( ipv6 ) {
         char ipv6_readable[INET6_ADDRSTRLEN];
         evutil_inet_ntop( AF_INET6, ipv6, ipv6_readable, INET6_ADDRSTRLEN );
@@ -120,7 +120,7 @@ announce_url_new( const tr_session * session, const tr_announce_request * req )
 }
 
 static tr_pex*
-listToPex( tr_benc * peerList, size_t * setme_len )
+listToPex( const tr_session * session, tr_benc * peerList, size_t * setme_len )
 {
     size_t i;
     size_t n;
@@ -144,7 +144,7 @@ listToPex( tr_benc * peerList, size_t * setme_len )
             continue;
         if( ( port < 0 ) || ( port > USHRT_MAX ) )
             continue;
-        if( !tr_address_is_valid_for_peers( &addr, port ) )
+        if( !tr_address_is_valid_for_peers( session, &addr, port ) )
             continue;
 
         pex[n].addr = addr;
@@ -272,7 +272,7 @@ on_announce_done( tr_session   * session,
                 response->pex = tr_peerMgrCompactToPex( raw, rawlen,
                                                NULL, 0, &response->pex_count );
             } else if( tr_bencDictFindList( &benc, "peers", &tmp ) ) {
-                response->pex = listToPex( tmp, &response->pex_count );
+                response->pex = listToPex( session, tmp, &response->pex_count );
                 dbgmsg( data->log_name, "got a peers list with %zu entries",
                         response->pex_count );
             }

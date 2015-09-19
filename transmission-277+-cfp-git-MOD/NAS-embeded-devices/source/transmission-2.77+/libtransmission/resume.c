@@ -27,9 +27,12 @@
 
 #define KEY_ACTIVITY_DATE       "activity-date"
 #define KEY_ADDED_DATE          "added-date"
+#define KEY_CHEATRATIO          "cheat-ratio"
 #define KEY_CORRUPT             "corrupt"
 #define KEY_DONE_DATE           "done-date"
 #define KEY_DOWNLOAD_DIR        "destination"
+#define KEY_GROUP               "group-destination"
+#define KEY_PRIVATEENABLED      "private-enabled"
 #define KEY_PIECE_TEMP_DIR      "piece-temp-dir"
 #define KEY_DND                 "dnd"
 #define KEY_DOWNLOADED          "downloaded"
@@ -680,7 +683,7 @@ tr_torrentSaveResume( tr_torrent * tor )
     if( !tr_isTorrent( tor ) )
         return;
 
-    tr_bencInitDict( &top, 50 ); /* arbitrary "big enough" number */
+    tr_bencInitDict( &top, 55 ); /* arbitrary "big enough" number */
     tr_bencDictAddInt( &top, KEY_TIME_SEEDING, tor->secondsSeeding );
     tr_bencDictAddInt( &top, KEY_TIME_DOWNLOADING, tor->secondsDownloading );
     tr_bencDictAddInt( &top, KEY_ACTIVITY_DATE, tor->activityDate );
@@ -693,11 +696,14 @@ tr_torrentSaveResume( tr_torrent * tor )
         tr_bencDictAddStr( &top, KEY_INCOMPLETE_DIR, tor->incompleteDir );
     if( tor->pieceTempDir != NULL )
         tr_bencDictAddStr( &top, KEY_PIECE_TEMP_DIR, tor->pieceTempDir );
+    tr_bencDictAddStr (&top, KEY_GROUP, tor->downloadGroup);
     tr_bencDictAddInt( &top, KEY_DOWNLOADED, tor->downloadedPrev + tor->downloadedCur );
     tr_bencDictAddInt( &top, KEY_UPLOADED, tor->uploadedPrev + tor->uploadedCur );
     tr_bencDictAddInt( &top, KEY_MAX_PEERS, tor->maxConnectedPeers );
     tr_bencDictAddInt( &top, KEY_BANDWIDTH_PRIORITY, tr_torrentGetPriority( tor ) );
     tr_bencDictAddBool( &top, KEY_PAUSED, !tor->isRunning && !tor->isQueued );
+    tr_bencDictAddReal( &top, KEY_CHEATRATIO, tor->cheatRatio );
+    tr_bencDictAddBool( &top, KEY_PRIVATEENABLED, tor->info.isPrivate );
     savePeers( &top, tor );
     if( tr_torrentHasMetadata( tor ) )
     {
@@ -790,6 +796,19 @@ loadFromFile( tr_torrent * tor, uint64_t fieldsToLoad )
         fieldsLoaded |= TR_FR_PIECE_TEMP_DIR;
     }
 
+  if ((fieldsToLoad & (TR_FR_PROGRESS | TR_FR_GROUP))
+      && (tr_bencDictFindStr (&top, KEY_GROUP, &str))
+      && (str && *str))
+    {
+      if (tr_strcmp0 (str, tor->downloadGroup))
+        {
+          tr_free (tor->downloadGroup);
+          tor->downloadGroup = tr_strdup (str);
+        }
+        fieldsLoaded |= TR_FR_GROUP;
+    }
+
+
     if( ( fieldsToLoad & TR_FR_DOWNLOADED )
       && tr_bencDictFindInt( &top, KEY_DOWNLOADED, &i ) )
     {
@@ -816,6 +835,21 @@ loadFromFile( tr_torrent * tor, uint64_t fieldsToLoad )
     {
         tor->isRunning = !boolVal;
         fieldsLoaded |= TR_FR_RUN;
+    }
+
+    if( ( fieldsToLoad & TR_FR_PRIVATE_ENABLED )
+      && tr_bencDictFindBool( &top, KEY_PRIVATEENABLED, &boolVal ) )
+    {
+        tor->info.isPrivate = boolVal;
+        fieldsLoaded |= TR_FR_PRIVATE_ENABLED;
+    }
+
+    double cratio;
+    if( ( fieldsToLoad & TR_FR_CHEAT_RATIO )
+      && tr_bencDictFindReal( &top, KEY_CHEATRATIO, &cratio ) )
+    {
+        tor->cheatRatio = cratio;
+        fieldsLoaded |= TR_FR_CHEAT_RATIO;
     }
 
     if( ( fieldsToLoad & TR_FR_ADDED_DATE )
