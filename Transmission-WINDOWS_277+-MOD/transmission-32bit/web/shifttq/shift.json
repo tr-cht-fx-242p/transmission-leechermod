@@ -1,0 +1,17 @@
+{
+  "fileLink": "http://localhost/downloads/",
+  "fileLinkEnabled": false,
+  "folderLink": "http://localhost/downloads/",
+  "folderLinkEnabled": false,
+  "incompleteFileLink": "http://localhost/downloads/incomplete/",
+  "incompleteFileLinkEnabled": false,
+  "incompleteFolderLink": "http://localhost/downloads/incomplete/",
+  "incompleteFolderLinkEnabled": false,
+  "showSpeedTitle": false,
+  "soundEnabled": false,
+  "soundDone": "",
+  "soundVolume": "0.1",
+  "torrentLink": "http://localhost/torrents/",
+  "torrentLinkEnabled": false,
+  "trackers": ""
+}
