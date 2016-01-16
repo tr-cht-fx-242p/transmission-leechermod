@@ -7,7 +7,7 @@
  * This exemption does not extend to derived works not owned by
  * the Transmission project.
  *
- * $Id: peer-msgs.c 14550 2015-07-21 23:27:48Z jordan $
+ * $Id: peer-msgs.c 14636 2016-01-02 17:14:24Z jordan $
  */
 
 #include <assert.h>
@@ -180,7 +180,6 @@ struct tr_peermsgs
     uint16_t        pexCount;
     uint16_t        pexCount6;
 
-    size_t          metadata_size_hint;
 #if 0
     size_t                 fastsetSize;
     tr_piece_index_t       fastset[MAX_FAST_SET_SIZE];
@@ -922,10 +921,8 @@ parseLtepHandshake( tr_peermsgs * msgs, int len, struct evbuffer * inbuf )
     }
 
     /* look for metainfo size (BEP 9) */
-    if( tr_bencDictFindInt( &val, "metadata_size", &i ) ) {
+    if( tr_bencDictFindInt( &val, "metadata_size", &i ) )
         tr_torrentSetMetadataSizeHint( msgs->torrent, i );
-        msgs->metadata_size_hint = (size_t) i;
-    }
 
     /* look for upload_only (BEP 21) */
     if( tr_bencDictFindInt( &val, "upload_only", &i ) )
@@ -1000,7 +997,7 @@ parseUtMetadata( tr_peermsgs * msgs, int msglen, struct evbuffer * inbuf )
         && ( piece * METADATA_PIECE_SIZE + (msg_end - benc_end) <= total_size ) )
     {
         const int pieceLen = msg_end - benc_end;
-        tr_torrentSetMetadataPiece( msgs->torrent, piece, benc_end, pieceLen );
+        tr_torrentSetMetadataPiece( msgs->torrent, piece, benc_end, pieceLen, total_size );
     }
 
     if( msg_type == METADATA_MSG_TYPE_REQUEST )
@@ -1275,8 +1272,6 @@ messageLengthIsCorrect( const tr_peermsgs * msg, uint8_t id, uint32_t len )
                // ( msg->torrent->info.pieceCount + 7u ) / 8u + 1u  --- (x + 7u) / 8u --- (x >> 3) + (x & 7 ? 1 : 0)
             /* we don't know the piece count yet,
                so we can only guess whether to send true or false */
-            if( msg->metadata_size_hint > 0 )
-                return len <= msg->metadata_size_hint;
             return true;
 
         case BT_REQUEST:

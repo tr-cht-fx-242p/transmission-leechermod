@@ -1,5 +1,29 @@
 https://github.com/cfpp2p/transmission/commits/cygwin
 
+Commits on Jan 14, 2016
+
+    Fix magnet stall when first connection corrupt.
+    Reproducible with µTorrent 3.4.0 (Beta).
+    cfpp2p committed Jan 14, 2016 
+
+Commits on Jan 12, 2016
+
+    Improved magnet acquisition speed.
+    Missing "else" in tr_torrentSetMetadataSizeHint
+    cfpp2p committed Jan 12, 2016 
+
+Commits on Jan 9, 2016
+
+    Improve error checking on metadata retrieval.
+    https://trac.transmissionbt.com/changeset/14664
+    cfpp2p committed Jan 9, 2016 
+
+Commits on Jan 3, 2016
+
+    fix crash in torrent-magnet.c tr_torrentSetMetadataPiece()
+    https://trac.transmissionbt.com/ticket/6048
+    cfpp2p committed Jan 2, 2016
+
 Commits on Sep 11, 2015
 
     Enable optional IPv6 listening port. Proper fix for
