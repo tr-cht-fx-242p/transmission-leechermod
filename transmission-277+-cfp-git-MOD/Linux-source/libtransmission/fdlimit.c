@@ -261,8 +261,7 @@ tr_set_file_for_single_pass( int fd )
 #endif
 #ifdef SYS_DARWIN
         fcntl( fd, F_RDAHEAD, 1 );
-// #5423
-//         fcntl( fd, F_NOCACHE, 1 );
+        fcntl( fd, F_NOCACHE, 1 );
 #endif
         errno = err;
     }
@@ -428,7 +427,7 @@ fileset_construct( struct tr_fileset * set, int n )
 {
     struct tr_cached_file * o;
     const struct tr_cached_file TR_CACHED_FILE_INIT
-        = { 0, -1, 0, 0, 0, TR_FD_INDEX_FILE };
+        = { 0, -1, 0, 0, TR_FD_INDEX_FILE, 0 };
 
     set->begin = tr_new( struct tr_cached_file, n );
     set->end = set->begin + n;

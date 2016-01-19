@@ -7,7 +7,7 @@
  * This exemption does not extend to derived works not owned by
  * the Transmission project.
  *
- * $Id: torrent-magnet.c 13397 2012-07-23 15:28:27Z jordan $
+ * $Id: torrent-magnet.c 14664 2016-01-08 22:57:17Z jordan $
  */
 
 #include <assert.h>
@@ -58,6 +58,8 @@ struct tr_incomplete_metadata
     /** sorted from least to most recently requested */
     struct metadata_node * piecesNeeded;
     int piecesNeededCount;
+    bool incomplete_metadata_failed;
+    int bad_piece_count;
 };
 
 static void
@@ -77,21 +79,43 @@ tr_torrentSetMetadataSizeHint( tr_torrent * tor, int size )
         {
             int i;
             struct tr_incomplete_metadata * m;
-            const int n = ( size + ( METADATA_PIECE_SIZE - 1 ) ) / METADATA_PIECE_SIZE;
+            int n = ( size + ( METADATA_PIECE_SIZE - 1 ) ) / METADATA_PIECE_SIZE;
             dbgmsg( tor, "metadata is %d bytes in %d pieces", size, n );
 
             m = tr_new( struct tr_incomplete_metadata, 1 );
-            m->pieceCount = n;
-            m->metadata = tr_new( uint8_t, size );
+            if( m == NULL )
+                return;
+
+            m->bad_piece_count = 0;
+            m->metadata = NULL;
+            m->piecesNeeded = NULL;
+
+            if( ( n < 1 ) || ( size < 1 ) )
+            {
+                tr_err( "Metadata Size Hint failure size %d, n %d", size, n );
+                n = 0;
+                size = 0;
+            }
+            else
+                m->incomplete_metadata_failed = false;
+
             m->metadata_size = size;
             m->piecesNeededCount = n;
-            m->piecesNeeded = tr_new( struct metadata_node, n );
+            m->pieceCount = n;
 
-            for( i=0; i<n; ++i ) {
+            if( size )
+                m->metadata = tr_new( uint8_t, size );
+            if( m->metadata == NULL )
+                m->incomplete_metadata_failed = true;
+
+            if( n )
+                m->piecesNeeded = tr_new( struct metadata_node, n );
+            if( m->piecesNeeded == NULL )
+                m->incomplete_metadata_failed = true;
+            else for( i=0; i<n; ++i ) {
                 m->piecesNeeded[i].piece = i;
                 m->piecesNeeded[i].requestedAt = 0;
             }
-
             tor->incompleteMetadata = m;
         }
     }
@@ -195,9 +219,10 @@ tr_torrentGetMetadataPiece( tr_torrent * tor, int piece, int * len )
 }
 
 void
-tr_torrentSetMetadataPiece( tr_torrent  * tor, int piece, const void  * data, int len )
+tr_torrentSetMetadataPiece( tr_torrent  * tor, int piece, const void  * data, int len, int64_t totalSize )
 {
     int i;
+    int64_t metadataSize;
     struct tr_incomplete_metadata * m;
     const int offset = piece * METADATA_PIECE_SIZE;
 
@@ -210,9 +235,38 @@ tr_torrentSetMetadataPiece( tr_torrent  * tor, int piece, const void  * data, in
     if( m == NULL )
         return;
 
-    /* does this data pass the smell test? */
-    if( offset + len > m->metadata_size )
+    /* max set to zero or less disables magnet link torrents */
+    if( ( tor->session->maxMagnetBadPiece < 1 )
+         || ( ( tor->session->maxMagnetBadPiece == 1 ) && ( m->incomplete_metadata_failed ) ) )
+    {
+        incompleteMetadataFree( tor->incompleteMetadata );
+        tor->incompleteMetadata = NULL;
+        tr_torrentSetLocalError( tor, "%s", _( "Magnet torrents disabled. To enable set magnet-bad-piece-max to 2 or greater.-set-" ) );
         return;
+    }
+
+    if( m->incomplete_metadata_failed )
+    {
+        tr_err( "Incomplete metadata failed" );
+        incompleteMetadataFree( tor->incompleteMetadata );
+        tor->incompleteMetadata = NULL;
+        return;
+    }
+
+    metadataSize = (int64_t)m->metadata_size;
+    dbgmsg( tor, "metadata size %d    total size %d", m->metadata_size, (int)totalSize );
+
+    /* does this data pass the smell test? */
+    if( ( offset + len > m->metadata_size ) || ( metadataSize > totalSize ) )
+    {
+        if( ++m->bad_piece_count > tor->session->maxMagnetBadPiece )
+        {
+            incompleteMetadataFree( tor->incompleteMetadata );
+            tor->incompleteMetadata = NULL;
+            tr_torrentSetLocalError( tor, "%s", _( "Magnet bad piece count exceeded. To try again restart the torrent." ) );
+        }
+        return;
+    }
 
     /* do we need this piece? */
     for( i=0; i<m->piecesNeededCount; ++i )
@@ -306,17 +360,26 @@ tr_torrentSetMetadataPiece( tr_torrent  * tor, int piece, const void  * data, in
         }
         else /* drat. */
         {
-            const int n = m->pieceCount;
-            for( i=0; i<n; ++i )
+            if( ++m->bad_piece_count > tor->session->maxMagnetBadPiece )
             {
-                m->piecesNeeded[i].piece = i;
-                m->piecesNeeded[i].requestedAt = 0;
+                incompleteMetadataFree( tor->incompleteMetadata );
+                tor->incompleteMetadata = NULL;
+                tr_torrentSetLocalError( tor, "%s", _( "Magnet bad piece count exceeded. To try again restart torrent." ) );
             }
-            m->piecesNeededCount = n;
-            dbgmsg( tor, "metadata error; trying again. %d pieces left", n );
+            else
+            {
+                const int n = m->pieceCount;
+                for( i=0; i<n; ++i )
+                {
+                    m->piecesNeeded[i].piece = i;
+                    m->piecesNeeded[i].requestedAt = 0;
+                }
+                m->piecesNeededCount = n;
+                dbgmsg( tor, "metadata error; trying again. %d pieces left", n );
 
-            tr_err( "magnet status: checksum passed %d, metainfo parsed %d",
-                    (int)checksumPassed, (int)metainfoParsed );
+                tr_err( "magnet status: checksum passed %d, metainfo parsed %d",
+                        (int)checksumPassed, (int)metainfoParsed );
+            }
         }
     }
 }
@@ -331,9 +394,28 @@ tr_torrentGetNextMetadataRequest( tr_torrent * tor, time_t now, int * setme_piec
 
     m = tor->incompleteMetadata;
 
-    if( ( m != NULL )
-        && ( m->piecesNeededCount > 0 )
-        && ( m->piecesNeeded[0].requestedAt + MIN_REPEAT_INTERVAL_SECS < now ) )
+    if( m == NULL )
+        return have_request;
+
+    /* max set to zero or less disables magnet link torrents */
+    if( ( tor->session->maxMagnetBadPiece < 1 )
+         || ( ( tor->session->maxMagnetBadPiece == 1 ) && ( m->incomplete_metadata_failed ) ) )
+    {
+        incompleteMetadataFree( tor->incompleteMetadata );
+        tor->incompleteMetadata = NULL;
+        tr_torrentSetLocalError( tor, "%s", _( "Magnet torrents disabled. To enable set magnet-bad-piece-max to 2 or greater." ) );
+        return have_request;
+    }
+
+    if( m->incomplete_metadata_failed )
+    {
+        tr_err( "Incomplete metadata failed" );
+        incompleteMetadataFree( tor->incompleteMetadata );
+        tor->incompleteMetadata = NULL;
+        return have_request;
+    }
+
+    if( ( m->piecesNeededCount > 0 ) && ( m->piecesNeeded[0].requestedAt + MIN_REPEAT_INTERVAL_SECS < now ) )
     {
         int i;
         const int piece = m->piecesNeeded[0].piece;
