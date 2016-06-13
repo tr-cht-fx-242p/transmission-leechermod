@@ -612,6 +612,7 @@ const
   idxStreamingMode = 23;
   idxCheatMode = 24;
   idxSdRatio = 25;
+  idxSizeLeft = 26;
  
   idxTag = -1;
   idxSeedsTotal = -2;
@@ -691,11 +692,11 @@ const
 
   StatusFiltersCount = 7;
 
-  TorrentFieldsMap: array[idxName..idxSdRatio] of string =
+  TorrentFieldsMap: array[idxName..idxSizeLeft] of string =
     ('', 'totalSize', '', 'status', 'peersSendingToUs,seeders',
      'peersGettingFromUs,leechers', 'rateDownload', 'rateUpload', 'eta', 'uploadRatio',
      'downloadedEver', 'uploadedEver', '', '', 'addedDate', 'doneDate', 'activityDate', '', 'bandwidthPriority',
-     '', '', 'queuePosition', 'secondsSeeding', 'streamingMode', 'cheatMode', '');
+     '', '', 'queuePosition', 'secondsSeeding', 'streamingMode', 'cheatMode', 'leftUntilDone', '');
 
 implementation
 
@@ -1763,25 +1764,30 @@ begin
         edPeerLimit.Value:=t.Objects[0].Integers['maxConnectedPeers'];
         files:=t.Objects[0].Arrays['files'];
         path:=GetFilesCommonPath(files);
-        lvFiles.Items.RowCnt:=files.Count;
-        for i:=0 to files.Count - 1 do begin
-          res:=files.Objects[i];
-          s:=UTF8Encode(res.Strings['name']);
-          if (path <> '') and (Copy(s, 1, Length(path)) = path) then
-            s:=Copy(s, Length(path) + 1, MaxInt);
-          ss:=ExtractFileName(s);
-          if ss <> s then
-            HasFolders:=True;
-          lvFiles.Items[idxAtName, i]:=UTF8Decode(ss);
-          lvFiles.Items[idxAtSize, i]:=res.Floats['length'];
-          lvFiles.Items[idxAtFullPath, i]:=UTF8Decode(s);
-          lvFiles.Items[idxAtFileID, i]:=i;
-          lvFiles.Items[idxAtLevel, i]:=_GetLevel(s);
+          lvFiles.Items.BeginUpdate;
+          try
+            lvFiles.Items.RowCnt:=files.Count;
+            for i:=0 to files.Count - 1 do begin
+              res:=files.Objects[i];
+              s:=UTF8Encode(res.Strings['name']);
+              if (path <> '') and (Copy(s, 1, Length(path)) = path) then
+                s:=Copy(s, Length(path) + 1, MaxInt);
+              ss:=ExtractFileName(s);
+              if ss <> s then
+                HasFolders:=True;
+              lvFiles.Items[idxAtName, i]:=UTF8Decode(ss);
+              lvFiles.Items[idxAtSize, i]:=res.Floats['length'];
+              lvFiles.Items[idxAtFullPath, i]:=UTF8Decode(s);
+              lvFiles.Items[idxAtFileID, i]:=i;
+              lvFiles.Items[idxAtLevel, i]:=_GetLevel(s);
+            end;
+            lvFiles.Items.Sort(idxAtFullPath);
+            i:=0;
+            _AddFolders(lvFiles.Items, '', i, lvFiles.Items.Count);
+            lvFiles.Items.Sort(idxAtFullPath);
+          finally
+            lvFiles.Items.EndUpdate;
         end;
-        lvFiles.Items.Sort(idxAtFullPath);
-        i:=0;
-        _AddFolders(lvFiles.Items, '', i, lvFiles.Items.Count);
-        lvFiles.Items.Sort(idxAtFullPath);
       finally
         args.Free;
       end;
@@ -3034,7 +3040,7 @@ begin
     case ADataCol of
       idxStatus:
         Text:=GetTorrentStatus(ARow);
-      idxSize, idxDownloaded, idxUploaded, idxSizeToDowload:
+      idxSize, idxDownloaded, idxUploaded, idxSizeToDowload, idxSizeLeft:
         Text:=GetHumanSize(Sender.Items[ADataCol, ARow]);
       idxDone:
         Text:=Format('%.1f%%', [double(Sender.Items[idxDone, ARow])]);
@@ -3630,7 +3636,8 @@ begin
     RpcObj.Http.ProxyUser:='';
     RpcObj.Http.ProxyPass:='';
   end;
-  RpcObj.Url:=Format('%s://%s:%d/transmission/rpc', [RpcObj.Url, FIni.ReadString(Sec, 'Host', ''), FIni.ReadInteger(Sec, 'Port', 9091)]);
+  RpcObj.RpcPath:=Ini.ReadString(Sec, 'RpcPath', '');
+  RpcObj.Url:=Format('%s://%s:%d', [RpcObj.Url, FIni.ReadString(Sec, 'Host', ''), FIni.ReadInteger(Sec, 'Port', 9091)]);
   SetRefreshInterval;
   RpcObj.InfoStatus:=sConnectingToDaemon;
   CheckStatus;
@@ -4241,6 +4248,7 @@ begin
       FTorrents[idxETA, row]:=MaxInt;
     GetTorrentValue(idxDownloaded, 'downloadedEver', vtExtended);
     GetTorrentValue(idxUploaded, 'uploadedEver', vtExtended);
+    GetTorrentValue(idxSizeLeft, 'leftUntilDone', vtExtended);
     GetTorrentValue(idxAddedOn, 'addedDate', vtExtended);
     GetTorrentValue(idxCompletedOn, 'doneDate', vtExtended);
     GetTorrentValue(idxLastActive, 'activityDate', vtExtended);
@@ -4816,7 +4824,7 @@ begin
   panTransfer.ChildSizing.Layout:=cclNone;
   txStatus.Caption:=GetTorrentStatus(idx);
   txError.Caption:=GetTorrentError(t);
-  txRemaining.Caption:=EtaToString(t.Integers['eta']);
+  txRemaining.Caption:=EtaToString(t.Integers['eta'])+' ('+GetHumanSize(t.Floats['leftUntilDone'])+')';
   txDownloaded.Caption:=GetHumanSize(t.Floats['downloadedEver']);
   txUploaded.Caption:=GetHumanSize(t.Floats['uploadedEver']);
   f:=t.Floats['pieceSize'];
