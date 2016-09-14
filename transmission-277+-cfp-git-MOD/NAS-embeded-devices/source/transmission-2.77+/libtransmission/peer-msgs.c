@@ -805,7 +805,8 @@ sendLtepHandshake( tr_peermsgs * msgs )
     msgs->clientSentLtepHandshake = 1;
 
     /* decide if we want to advertise metadata xfer support (BEP 9) */
-    if( tr_torrentIsPrivate( msgs->torrent ) )
+    if( tr_torrentIsPrivate( msgs->torrent )
+        || ( tr_torrentHasMetadata( msgs->torrent ) && msgs->torrent->session->maxMagnetBadPiece == 1 ) )
         allow_metadata_xfer = 0;
     else
         allow_metadata_xfer = 1;
@@ -1002,9 +1003,18 @@ parseUtMetadata( tr_peermsgs * msgs, int msglen, struct evbuffer * inbuf )
 
     if( msg_type == METADATA_MSG_TYPE_REQUEST )
     {
+        if( msgs->torrent->cheatMode == 1 )
+        {
+            ++msgs->torrent->uploadedCur;
+            msgs->torrent->isDirty = true;
+        }
+        // SRS 07-22-2016  log the request as a 1 byte upload -- useful results ONLY when zero uplaod speed set
+        // and active only when cheatMode = TR_CHEAT_ALWLEECH
         if( ( piece >= 0 )
+            && ( piece < ( ( msgs->torrent->infoDictLength + ( METADATA_PIECE_SIZE - 1 ) ) / METADATA_PIECE_SIZE ) )
             && tr_torrentHasMetadata( msgs->torrent )
             && !tr_torrentIsPrivate( msgs->torrent )
+            && ( msgs->torrent->session->maxMagnetBadPiece != 1 )
             && ( msgs->peerAskedForMetadataCount < METADATA_REQQ ) )
         {
             msgs->peerAskedForMetadata[msgs->peerAskedForMetadataCount++] = piece;
@@ -1892,7 +1902,10 @@ fillOutputBuffer( tr_peermsgs * msgs, time_t now )
     if( ( tr_peerIoGetWriteBufferSpace( msgs->peer->io, now ) >= msgs->torrent->blockSize )
         && popNextRequest( msgs, &req ) )
     {
-        --msgs->prefetchCount;
+        if( msgs->prefetchCount > 0 )
+            --msgs->prefetchCount;
+        else
+            tr_torrentSetLocalError( msgs->torrent, _( "prefetch counter corrupt! prefetchCount value is %d . Upload failed." ), msgs->prefetchCount );
 
         if( requestIsValid( msgs, &req )
             && tr_cpPieceIsComplete( &msgs->torrent->completion, req.index )
