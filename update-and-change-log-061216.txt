@@ -1,7 +1,8 @@
-June 12, 2016
+August 10, 2016
 
-Download the main current regular release of what you want/(have)
-and use the update to replace/overwrite the exact corresponding.
+Download the main current regular release of what you want/(have) at:
+http://www.sb-innovation.de/f45/transmission-2-77-2-8x-leecher-mod-windows-linux-31407/
+and use this update to replace/overwrite the exact corresponding.
 
 We're up to date with 2.9x bug-fixes releases (and more) but
 I wont ever update the core to that.
@@ -10,6 +11,21 @@ I wont ever update the core to that.
 
 
 https://github.com/cfpp2p/transmission/commits/cygwin
+
+Enable Itorrents and Torrage
+http://itorrents.org/
+http://torrasave.download/
+remove torcache
+cfpp2p committed Aug 6, 2016
+
+`prefetchCount` can become less than zero.
+https://trac.transmissionbt.com/ticket/6164
+cfpp2p committed Aug 1, 2016
+
+Prevent invalid requests for magnet metadata pieces.
+Fixes https://trac.transmissionbt.com/ticket/6160
+Also, add setting for zero upload of magnet links.
+cfpp2p committed Jul 27, 2016
 
 From: cfpp2p <cfpp2p>
 Date: Wed, 1 Jun 2016 19:56:30 -0500
