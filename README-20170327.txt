@@ -1,16 +1,53 @@
-December 2, 2016
-
-Download the main current regular release of what you want/(have) at:
-http://www.sb-innovation.de/f45/transmission-2-77-2-8x-leecher-mod-windows-linux-31407/
-and use this update to replace/overwrite the exact corresponding.
-
-We're up to date with 2.9x bug-fixes releases (and more) but
-I wont ever update the core to that.
-
-
-
-
 https://github.com/cfpp2p/transmission/commits/cygwin
+
+March 27, 2017
+FIXED: prefetch cache false enable lightweight pauses seeding torrents
+
+March 04, 2017
+FIXED: Some Unicode .torrent files wouldn't load when double clicked.
+FIXED: Add trackers from duplicate torrents.
+ADDED: Add trackers from magnets links on duplicate torrents.
+ADDED: Allow zero as a global timeout for seeding (spin edit).
+FIXED: Adding torrent by url add trackers of duplicate torrents.
+FIXED: download of flags.zip.
+
+March 02, 2017
+libtransmission:
+FIXED: Incoming magnet links, with redundant keys.
+FIXED: Automatically rename if "invalid or corrupt" due to name or path.
+FIXED: Minor memory leak.
+web client:
+FIXED: https in comments.
+
+January 14, 2017
+Fixed: transmission-edit tool: don't re-order info dict
+Fixed: clarified that info-hash is the digest of en bencoding found in .torrent file
+Fixed: "Invalid or corrupt torrent file" for torrents with an empty name key.
+Fixed: "Unable to save resume file: File name too long" for magnet links with extremely long names.
+Fixed: Problem in extracting salt
+
+From 3b3a56ca26b8102ba25feb5db788913db94cfd7c Mon Sep 17 00:00:00 2001
+From: cfpp2p <cfpp2p>
+Date: Sat, 10 Dec 2016 03:12:05 -0500
+Subject: [PATCH] Add torrasave.site
+
+From 2909f4bacd1dc03aedb2404cac7474536c026536 Mon Sep 17 00:00:00 2001
+From: cfpp2p <cfpp2p>
+Date: Fri, 9 Dec 2016 23:13:41 -0500
+Subject: [PATCH] Add btcache.me and thetorrent.org, torrasave.download removed.
+
+
+Manual "add peer" to individual torrents via GUI and web client.
+example:
+add peer 192.168.1.77:51413
+torrent must be running
+magnet or .torrent file
+https://sourceforge.net/p/transmissiondaemon/discussion/general/thread/2c267046/#59ab
+----
+Allow any block size with small block size warning.
+Minimizes "Invalid or Corrupt" torrents.
+Fix minor memory leaks.
+cfpp2p commits November 23, 2016
 
 Don't retry magnet links with parse errors once checksum passes.
 Improved error messaging for user.
@@ -33,14 +70,14 @@ Also, add setting for zero upload of magnet links.
 cfpp2p committed Jul 27, 2016
 
 From: cfpp2p <cfpp2p>
+Date: Fri, 3 Jun 2016 20:26:38 -0500
+Subject: [PATCH] Fix error box details button not working.
+
+From: cfpp2p <cfpp2p>
 Date: Wed, 1 Jun 2016 19:56:30 -0500
 Subject: [PATCH] Allow extended ASCII character set ISO 8859-1
 set on/off with "clean-json-utf-enabled" in settings.json
 also fixed https://trac.transmissionbt.com/ticket/4882
-
-From: cfpp2p <cfpp2p>
-Date: Fri, 3 Jun 2016 20:26:38 -0500
-Subject: [PATCH] Fix error box details button not working.
 
 Commits on May 23, 2016
 
@@ -70,10 +107,9 @@ Commits on May 7, 2016
     add a "size left" column
     cfpp2p committed May 6, 2016
 
-Commits on Apr 20, 2016
-
-    Add setting for CURLOPT_MAXREDIRS to settings.json
-    cfpp2p committed Apr 20, 2016
+From: cfpp2p <cfpp2p>
+Date: Wed, 20 Apr 2016 13:54:06 -0500
+Subject: [PATCH] Add setting for CURLOPT_MAXREDIRS to settings.json
 
 Commits on Apr 9, 2016
 
@@ -101,10 +137,42 @@ Commits on Mar 19, 2016
 
 Commits on Mar 15, 2016
 
-    Enable torcache in the web client
-    cfpp2p committed Mar 14, 2016
+Enable torcache in the web client
+---
+Optionally allows use of torcache instead of magnet link or a direct hash
+ONLY when a magnet or hash is preceded by the letter t and a space.
+Presented in the "Open Torrent" -> "Upload Torrent Files" -> "enter a URL"
+Can use a base 16 or base 32 hash.
+
+Examples for torrent ubuntu ubuntu-15.10-desktop-i386.iso:
+
+t 268a4ef6845c1553d4328b3606c59f56372fce64
+
+T magnet:?xt=urn:btih:268a4ef6845c1553d4328b3606c59f56372fce64&dn=ubuntu-15.10-desktop-i386.iso&tr=http%3A%2F%2Ftorrent.ubuntu.com%3A6969%2Fannounce&tr=http%3A%2F%2Fipv6.torrent.ubuntu.com%3A6969%2Fannounce
+
+t e2fe55uelqkvhvbsrm3anrm7ky3s7tte (base 32 hash)
+
+t magnet:?xt=urn:btih:268a4ef6845c1553d4328b3606c59f56372fce64 
+----
+cfpp2p committed Mar 14, 2016
+
 
 Commits on Feb 28, 2016
+
+soft-STOP-localhost.cmd
+
+NEW .cmd file,where the release's .exe and .dll files are located.
+----
+Edit (with notepad or any text editor) as necessary:
+    localhost:9091 or whatever your daemon's host:port is
+    -n username:password user-name and password if you set them
+    http:// followed by nothing. (this line ONLY needed for if using 32 bit release)
+    "REM" disables a line by making it a remark line
+
+https://sourceforge.net/p/transmissiondaemon/discussion/general/thread/010fe8b6/
+https://sourceforge.net/p/transmissiondaemon/discussion/general/thread/b4eea1a5/
+https://sourceforge.net/p/transmissiondaemon/discussion/general/thread/6ec81ea0/
+----
 
     "Group Tag View (beta)" web client minor fixes
 
@@ -139,6 +207,10 @@ Commits on Jan 3, 2016
     cfpp2p committed Jan 2, 2016
 
 Commits on Sep 11, 2015
+
+    fully integrated grouping functionality web client
+    https://trac.transmissionbt.com/ticket/5385
+    cfpp2p authored Aug 11, 2015
 
     Enable optional IPv6 listening port. Proper fix for
     https://trac.transmissionbt.com/ticket/4886#comment:7
