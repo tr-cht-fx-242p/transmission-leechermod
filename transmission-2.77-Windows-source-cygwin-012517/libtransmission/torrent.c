@@ -1048,7 +1048,7 @@ torrentInit( tr_torrent * tor, const tr_ctor * ctor )
     if( tr_sessionIsIncompleteDirEnabled( session ) )
         tor->incompleteDir = tr_strdup( dir );
 
-    s = tr_metainfoGetBasename( &tor->info );
+    s = tr_metainfoGetBasename( &tor->info, TR_METAINFO_BASENAME_NAME_AND_PARTIAL_HASH, session );
     tor->pieceTempDir = tr_buildPath( tr_sessionGetPieceTempDir( tor->session ), s, NULL );
     tr_free( s );
 
@@ -1076,7 +1076,16 @@ torrentInit( tr_torrent * tor, const tr_ctor * ctor )
                                                   overwritten by the resume file */
 
     torrentInitFromInfo( tor );
-    loaded = tr_torrentLoadResume( tor, ~0, ctor );
+
+    bool didMigrateRenamedResumeFile = false;
+    loaded = tr_torrentLoadResume(tor, ~0, ctor, &didMigrateRenamedResumeFile);
+
+    if (didMigrateRenamedResumeFile)
+    {
+        /* Rename torrent file as well */
+        tr_metainfoMigrateFile(session, &tor->info, TR_METAINFO_BASENAME_HASH, TR_METAINFO_BASENAME_NAME_AND_PARTIAL_HASH);
+    }
+
     tor->completeness = tr_cpGetStatus( &tor->completion );
     setLocalErrorIfFilesDisappeared( tor );
 
@@ -3717,22 +3726,22 @@ setLocation( void * vdata )
             }
         }
 
-        if( !err )
-        {
+        if( !err && do_move )
             /* blow away the leftover subdirectories in the old location */
-            if( do_move )
-                tr_torrentDeleteLocalData( tor, remove );
-
-            /* set the new location and reverify */
-            tr_torrentSetDownloadDir( tor, location );
-        }
+            tr_torrentDeleteLocalData( tor, remove );
     }
 
-    if( !err && do_move )
+    if( !err )
     {
-        tr_free( tor->incompleteDir );
-        tor->incompleteDir = NULL;
-        tor->currentDir = tor->downloadDir;
+        /* set the new location and reverify */
+        tr_torrentSetDownloadDir( tor, location );
+
+        if( do_move )
+        {
+            tr_free( tor->incompleteDir );
+            tor->incompleteDir = NULL;
+            tor->currentDir = tor->downloadDir;
+        }
     }
 
     if( data->setme_state )

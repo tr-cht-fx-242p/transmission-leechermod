@@ -33,12 +33,39 @@
 ****
 ***/
 
-char*
-tr_metainfoGetBasename( const tr_info * inf )
+#define MAX_NAME_LENGTH 219
+// 219 + 36 = 255
+// . + 16_byte_hash + .torrent + .tmp.XXXXXX = 36 bytes
+// . + 16_byte_hash + .resume + .tmp.XXXXXX = 35 bytes
+// see tr_bencToFile() for more explanation
+
+
+static char*
+metainfoGetBasenameNameAndPartialHash( const tr_info * inf, const tr_session * session )
 {
     size_t i;
-    const size_t name_len = strlen( inf->name );
-    char * ret = tr_strdup_printf( "%s.%16.16s", inf->name, inf->hashString );
+    char * shortName;
+    char * cleanName;
+
+    if( !strlen( inf->name ) )
+        // allow empty name -- substitute
+        shortName = tr_strdup( "Hash-Name-" );
+    else if( strlen( inf->name ) <= MAX_NAME_LENGTH )
+        shortName = tr_strdup( inf->name );
+    else
+        // truncate
+        shortName = tr_strndup( inf->name, MAX_NAME_LENGTH );
+
+    if( session && session->cleanUTFenabled )
+        cleanName = tr_utf8clean( shortName, -1 );
+    else
+        cleanName = tr_strdup( shortName );
+    tr_free( shortName );
+
+    char * ret = tr_strdup_printf( "%s.%16.16s", cleanName, inf->hashString );
+
+    const size_t name_len = strlen( cleanName );
+    tr_free( cleanName );
 
     for( i=0; i<name_len; ++i )
         if( ( ret[i] == '/' ) || ( ret[i] == '\\' ) )
@@ -48,10 +75,31 @@ tr_metainfoGetBasename( const tr_info * inf )
     return ret;
 }
 
-static char*
-getTorrentFilename( const tr_session * session, const tr_info * inf )
+static char* metainfoGetBasenameHashOnly(tr_info const* inf)
 {
-    char * base = tr_metainfoGetBasename( inf );
+    return tr_strdup(inf->hashString);
+}
+
+char* tr_metainfoGetBasename(tr_info const* inf, enum tr_metainfo_basename_format format, const tr_session * session)
+{
+    switch (format)
+    {
+    case TR_METAINFO_BASENAME_NAME_AND_PARTIAL_HASH:
+        return metainfoGetBasenameNameAndPartialHash(inf, session);
+
+    case TR_METAINFO_BASENAME_HASH:
+        return metainfoGetBasenameHashOnly(inf);
+
+    default:
+        assert( 0 );
+        return NULL;
+    }
+}
+
+static char*
+getTorrentFilename(tr_session const* session, tr_info const* inf, enum tr_metainfo_basename_format format)
+{
+    char * base = tr_metainfoGetBasename(inf, format, session);
     char * filename = tr_strdup_printf( "%s" TR_PATH_DELIMITER_STR "%s.torrent",
                                         tr_getTorrentDir( session ), base );
     tr_free( base );
@@ -93,7 +141,7 @@ tr_metainfoMigrate( tr_session * session,
                     tr_info *   inf )
 {
     struct stat new_sb;
-    char *      name = getTorrentFilename( session, inf );
+    char *      name = getTorrentFilename(session, inf, TR_METAINFO_BASENAME_NAME_AND_PARTIAL_HASH);
 
     if( stat( name, &new_sb ) || ( ( new_sb.st_mode & S_IFMT ) != S_IFREG ) )
     {
@@ -666,7 +714,7 @@ tr_metainfoParseImpl( const tr_session  * session,
 
     /* filename of Transmission's copy */
     tr_free( inf->torrent );
-    inf->torrent = session ? getTorrentFilename( session, inf ) : NULL;
+    inf->torrent = session ? getTorrentFilename(session, inf, TR_METAINFO_BASENAME_NAME_AND_PARTIAL_HASH) : NULL;
 
     return NULL;
 }
@@ -729,11 +777,31 @@ tr_metainfoRemoveSaved( const tr_session * session, const tr_info * inf )
 {
     char * filename;
 
-    filename = getTorrentFilename( session, inf );
+    filename = getTorrentFilename(session, inf, TR_METAINFO_BASENAME_HASH);
+    unlink( filename );
+    tr_free( filename );
+
+    filename = getTorrentFilename(session, inf, TR_METAINFO_BASENAME_NAME_AND_PARTIAL_HASH);
     unlink( filename );
     tr_free( filename );
 
     filename = getOldTorrentFilename( session, inf );
     unlink( filename );
     tr_free( filename );
+}
+
+void tr_metainfoMigrateFile(tr_session const* session, tr_info const* info, enum tr_metainfo_basename_format old_format,
+    enum tr_metainfo_basename_format new_format)
+{
+    char* old_filename = getTorrentFilename(session, info, old_format);
+    char* new_filename = getTorrentFilename(session, info, new_format);
+
+    if (!rename(old_filename, new_filename))
+    {
+        tr_nerr( info->name, _( "Migrated torrent file from \"%s\" to \"%s\"" ),
+                old_filename, new_filename );
+    }
+
+    tr_free(new_filename);
+    tr_free(old_filename);
 }
