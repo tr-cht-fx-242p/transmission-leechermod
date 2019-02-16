@@ -55,7 +55,6 @@
 struct tr_rpc_server
 {
     bool               isEnabled;
-    bool               isPasswordEnabled;
     bool               isWhitelistEnabled;
     tr_port            port;
     char *             url;
@@ -219,7 +218,7 @@ handle_upload( struct evhttp_request * req,
         /* first look for the session id */
         for( i=0; i<n; ++i ) {
             struct tr_mimepart * p = tr_ptrArrayNth( &parts, i );
-            if( tr_memmem( p->headers, p->headers_len, TR_RPC_SESSION_ID_HEADER, strlen( TR_RPC_SESSION_ID_HEADER ) ) )
+            if( tr_memmemcase( p->headers, p->headers_len, TR_RPC_SESSION_ID_HEADER, strlen( TR_RPC_SESSION_ID_HEADER ) ) )
                 break;
         }
         if( i<n ) {
@@ -234,7 +233,7 @@ handle_upload( struct evhttp_request * req,
             int code = 409;
             const char * codetext = tr_webGetResponseStr( code );
             struct evbuffer * body = evbuffer_new( );
-            evbuffer_add_printf( body, "%s", "{ \"success\": false, \"msg\": \"Bad Session-Id\" }" );;
+            evbuffer_add_printf( body, "%s", "{ \"success\": false, \"msg\": \"Bad Session-Id\" }" );
             evhttp_send_reply( req, code, codetext, body );
             evbuffer_free( body );
         }
@@ -288,7 +287,7 @@ handle_upload( struct evhttp_request * req,
             int code = HTTP_OK;
             const char * codetext = tr_webGetResponseStr( code );
             struct evbuffer * body = evbuffer_new( );
-            evbuffer_add_printf( body, "%s", "{ \"success\": true, \"msg\": \"Torrent Added\" }" );;
+            evbuffer_add_printf( body, "%s", "{ \"success\": true, \"msg\": \"Torrent Added\" }" );
             evhttp_send_reply( req, code, codetext, body );
             evbuffer_free( body );
         }
@@ -616,8 +615,7 @@ handle_request( struct evhttp_request * req, void * arg )
                 "<p>If you're editing settings.json, see the 'rpc-whitelist' and 'rpc-whitelist-enabled' entries.</p>"
                 "<p>If you're still using ACLs, use a whitelist instead. See the transmission-daemon manpage for details.</p>" );
         }
-        else if( server->isPasswordEnabled
-                 && ( !pass || !user || strcmp( server->username, user )
+        else if( ( !pass || !user || strcmp( server->username, user )
                                      || !tr_ssha1_matches( server->password,
                                                            pass ) ) )
         {
@@ -867,14 +865,14 @@ tr_rpcGetPassword( const tr_rpc_server * server )
 void
 tr_rpcSetPasswordEnabled( tr_rpc_server * server, bool isEnabled )
 {
-    server->isPasswordEnabled = isEnabled;
-    dbgmsg( "setting 'password enabled' to %d", (int)isEnabled );
+    dbgmsg( "ALWAYS 'password enabled' %d", 1 );
+    tr_ninf( MY_NAME, "%s", _( "Password ALWAYS required" ) );
 }
 
 bool
 tr_rpcIsPasswordEnabled( const tr_rpc_server * server )
 {
-    return server->isPasswordEnabled;
+    return true;
 }
 
 const char *
@@ -958,8 +956,9 @@ tr_rpcInit( tr_session  * session, tr_benc * settings )
     key = TR_PREFS_KEY_RPC_AUTH_REQUIRED;
     if( !tr_bencDictFindBool( settings, key, &boolVal ) )
         tr_nerr( MY_NAME, _( "Couldn't find settings key \"%s\"" ), key );
-    else
-        tr_rpcSetPasswordEnabled( s, boolVal );
+
+    boolVal = 1;
+    tr_rpcSetPasswordEnabled( s, boolVal );
 
     key = TR_PREFS_KEY_RPC_WHITELIST;
     if( !tr_bencDictFindStr( settings, key, &str ) && str )
@@ -1000,8 +999,7 @@ tr_rpcInit( tr_session  * session, tr_benc * settings )
         if( s->isWhitelistEnabled )
             tr_ninf( MY_NAME, "%s", _( "Whitelist enabled" ) );
 
-        if( s->isPasswordEnabled )
-            tr_ninf( MY_NAME, "%s", _( "Password required" ) );
+        tr_ninf( MY_NAME, "%s", _( "Password required" ) );
     }
 
     return s;

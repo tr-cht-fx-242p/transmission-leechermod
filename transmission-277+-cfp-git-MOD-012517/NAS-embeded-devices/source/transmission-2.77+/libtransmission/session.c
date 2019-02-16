@@ -367,7 +367,7 @@ tr_sessionGetDefaultSettings( tr_benc * d )
 
     assert( tr_bencIsDict( d ) );
 
-    tr_bencDictReserve( d, 91);
+    tr_bencDictReserve( d, 92);
     tr_bencDictAddBool( d, TR_PREFS_KEY_BLOCKLIST_ENABLED,               false );
     tr_bencDictAddBool( d, TR_PREFS_KEY_BLOCKLIST_WEBSEEDS,              false );
     tr_bencDictAddBool( d, TR_PREFS_KEY_IPV6_ENABLED,                    false );
@@ -409,11 +409,11 @@ tr_sessionGetDefaultSettings( tr_benc * d )
     tr_bencDictAddReal( d, TR_PREFS_KEY_RATIO,                           2.0 );
     tr_bencDictAddBool( d, TR_PREFS_KEY_RATIO_ENABLED,                   false );
     tr_bencDictAddBool( d, TR_PREFS_KEY_RENAME_PARTIAL_FILES,            true );
-    tr_bencDictAddBool( d, TR_PREFS_KEY_RPC_AUTH_REQUIRED,               false );
+    tr_bencDictAddBool( d, TR_PREFS_KEY_RPC_AUTH_REQUIRED,               true );
     tr_bencDictAddStr ( d, TR_PREFS_KEY_RPC_BIND_ADDRESS,                "0.0.0.0" );
     tr_bencDictAddBool( d, TR_PREFS_KEY_RPC_ENABLED,                     false );
-    tr_bencDictAddStr ( d, TR_PREFS_KEY_RPC_PASSWORD,                    "" );
-    tr_bencDictAddStr ( d, TR_PREFS_KEY_RPC_USERNAME,                    "" );
+    tr_bencDictAddStr ( d, TR_PREFS_KEY_RPC_PASSWORD,                    "{ff3d1303a1a34c7890d8c9e2e53306ea7feb5e4fx4cs1y9k" );
+    tr_bencDictAddStr ( d, TR_PREFS_KEY_RPC_USERNAME,                    "You must set the rpc-username & rpc-password" );
     tr_bencDictAddStr ( d, TR_PREFS_KEY_RPC_WHITELIST,                   TR_DEFAULT_RPC_WHITELIST );
     tr_bencDictAddBool( d, TR_PREFS_KEY_RPC_WHITELIST_ENABLED,           true );
     tr_bencDictAddInt ( d, TR_PREFS_KEY_RPC_PORT,                        atoi( TR_DEFAULT_RPC_PORT_STR ) );
@@ -455,6 +455,8 @@ tr_sessionGetDefaultSettings( tr_benc * d )
     tr_bencDictAddInt ( d, TR_PREFS_KEY_MULTISCRAPE_MAXIMUM,             64 );
     tr_bencDictAddInt ( d, TR_PREFS_KEY_CONCURRENT_ANNOUNCE_MAXIMUM,     48 );
     tr_bencDictAddBool( d, TR_PREFS_KEY_CLEAN_JSON_UTF,                  false );
+    tr_bencDictAddInt ( d, TR_PREFS_KEY_DHT_BLOCK_THIS_PORT,             1 );
+
 
   tr_bencDictAddStr  (d, TR_PREFS_KEY_DOWNLOAD_GROUP_DEFAULT,          tr_getDefaultDownloadGroupDefault ());
   knownGroups = tr_getDefaultDownloadGroups ();
@@ -470,7 +472,7 @@ tr_sessionGetSettings( tr_session * s, struct tr_benc * d )
 
     assert( tr_bencIsDict( d ) );
 
-    tr_bencDictReserve( d, 90 );
+    tr_bencDictReserve( d, 91 );
     tr_bencDictAddBool( d, TR_PREFS_KEY_BLOCKLIST_ENABLED,                tr_blocklistIsEnabled( s ) );
     tr_bencDictAddBool( d, TR_PREFS_KEY_BLOCKLIST_WEBSEEDS,               s->blockListWebseeds );
     tr_bencDictAddBool( d, TR_PREFS_KEY_IPV6_ENABLED,                     s->ipv6Enabled );
@@ -557,6 +559,8 @@ tr_sessionGetSettings( tr_session * s, struct tr_benc * d )
     tr_bencDictAddInt ( d, TR_PREFS_KEY_MULTISCRAPE_MAXIMUM,              s->maxMultiscrape );
     tr_bencDictAddInt ( d, TR_PREFS_KEY_CONCURRENT_ANNOUNCE_MAXIMUM,      s->maxConcurrentAnnounces );
     tr_bencDictAddBool( d, TR_PREFS_KEY_CLEAN_JSON_UTF,                   tr_sessionGetCleanJsonUtf( s ) );
+    tr_bencDictAddInt ( d, TR_PREFS_KEY_DHT_BLOCK_THIS_PORT,              s->dhtBlockThisPort );
+
 
   tr_bencDictAddStr  (d, TR_PREFS_KEY_DOWNLOAD_GROUP_DEFAULT,       tr_sessionGetDownloadGroupDefault (s));
   knownGroups = tr_sessionGetDownloadGroups (s);
@@ -916,6 +920,8 @@ sessionSetImpl( void * vdata )
         session->peer_congestion_algorithm = tr_strdup("");
     if( tr_bencDictFindBool( settings, TR_PREFS_KEY_BLOCKLIST_ENABLED, &boolVal ) )
         tr_blocklistSetEnabled( session, boolVal );
+        // blocklist override never on at session startup
+        session->isBlocklistOverride = false;
     if( tr_bencDictFindStr( settings, TR_PREFS_KEY_BLOCKLIST_URL, &str ) )
         tr_blocklistSetURL( session, str );
     if( tr_bencDictFindBool( settings, TR_PREFS_KEY_START, &boolVal ) )
@@ -961,6 +967,8 @@ sessionSetImpl( void * vdata )
         session->maxConcurrentAnnounces = ( i >= 0 ) ? i : -1 ;
     if( tr_bencDictFindBool( settings, TR_PREFS_KEY_CLEAN_JSON_UTF, &boolVal ) )
         session->cleanUTFenabled = boolVal;
+    if( tr_bencDictFindInt( settings, TR_PREFS_KEY_DHT_BLOCK_THIS_PORT, &i ) )
+        session->dhtBlockThisPort = ( ( i >= 0 ) && ( i <= USHRT_MAX ) ) ? i : 0 ;
 
   if (tr_bencDictFindList (settings, TR_PREFS_KEY_DOWNLOAD_GROUPS, &groups))
   {
@@ -2562,6 +2570,14 @@ tr_blocklistIsEnabled( const tr_session * session )
     return session->isBlocklistEnabled;
 }
 
+bool
+tr_blocklistIsOverride( const tr_session * session )
+{
+    assert( tr_isSession( session ) );
+
+    return session->isBlocklistOverride;
+}
+
 void
 tr_blocklistSetEnabled( tr_session * session, bool isEnabled )
 {
@@ -2570,9 +2586,24 @@ tr_blocklistSetEnabled( tr_session * session, bool isEnabled )
     assert( tr_isSession( session ) );
 
     session->isBlocklistEnabled = isEnabled != 0;
+    session->isBlocklistOverride = false;
 
     for( l=session->blocklists; l!=NULL; l=l->next )
         _tr_blocklistSetEnabled( l->data, isEnabled );
+}
+
+void
+tr_blocklistSetOverride( tr_session * session, bool isEnabled )
+{
+    tr_list * l;
+
+    assert( tr_isSession( session ) );
+
+    session->isBlocklistOverride = isEnabled;
+    session->isBlocklistEnabled = true;
+
+    for( l=session->blocklists; l!=NULL; l=l->next )
+        _tr_blocklistSetEnabled( l->data, !isEnabled );
 }
 
 bool
@@ -3233,6 +3264,27 @@ tr_sessionGetMaxConcurrentAnnounces( const tr_session * session )
     assert( tr_isSession( session ) );
 
     return session->maxConcurrentAnnounces;
+}
+
+void
+tr_sessionSetDHTblockThisPort( tr_session * session, tr_port dhtBlockThisPort )
+{
+    assert( tr_isSession( session ) );
+//    if( dhtBlockThisPort >= 0 )  always >= 0 due to type
+//    {
+        session->dhtBlockThisPort = dhtBlockThisPort;
+        printf( "transmission session: Block DHT port set to %d \n", dhtBlockThisPort );
+        fflush( stdout );
+//    }
+   
+}
+
+tr_port
+tr_sessionGetDHTblockThisPort( const tr_session * session )
+{
+    assert( tr_isSession( session ) );
+
+    return session->dhtBlockThisPort;
 }
 
 /****

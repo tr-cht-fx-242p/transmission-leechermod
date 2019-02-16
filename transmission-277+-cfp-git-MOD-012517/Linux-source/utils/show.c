@@ -7,7 +7,7 @@
  *
  * http://www.gnu.org/licenses/old-licenses/gpl-2.0.html
  *
- * $Id: show.c 13475 2012-09-07 04:25:04Z jordan $
+ * $Id: show.c 12225 2011-03-24 22:57:39Z jordan $
  */
 
 #include <stdio.h> /* fprintf() */
@@ -36,24 +36,25 @@
 #define MEM_G_STR "GiB"
 #define MEM_T_STR "TiB"
 
-#define DISK_K 1000
-#define DISK_B_STR  "B"
-#define DISK_K_STR "kB"
-#define DISK_M_STR "MB"
-#define DISK_G_STR "GB"
-#define DISK_T_STR "TB"
+#define DISK_K 1024
+#define DISK_B_STR "B"
+#define DISK_K_STR "KiB"
+#define DISK_M_STR "MiB"
+#define DISK_G_STR "GiB"
+#define DISK_T_STR "TiB"
 
-#define SPEED_K 1000
-#define SPEED_B_STR  "B/s"
-#define SPEED_K_STR "kB/s"
-#define SPEED_M_STR "MB/s"
-#define SPEED_G_STR "GB/s"
-#define SPEED_T_STR "TB/s"
+#define SPEED_K 1024
+#define SPEED_B_STR "B/s"
+#define SPEED_K_STR "KiB/s"
+#define SPEED_M_STR "MiB/s"
+#define SPEED_G_STR "GiB/s"
+#define SPEED_T_STR "TiB/s"
 
 static tr_option options[] =
 {
   { 'm', "magnet", "Give a magnet link for the specified torrent", "m", 0, NULL },
   { 's', "scrape", "Ask the torrent's trackers how many peers are in the torrent's swarm", "s", 0, NULL },
+  { 'u', "unsorted", "Do not sort files by name", "u", 0, NULL },
   { 'V', "version", "Show version number and exit", "V", 0, NULL },
   { 0, NULL, NULL, NULL, 0, NULL }
 };
@@ -66,6 +67,7 @@ getUsage( void )
 
 static bool magnetFlag = false;
 static bool scrapeFlag = false;
+static bool unsorted = false;
 static bool showVersion = false;
 const char * filename = NULL;
 
@@ -81,6 +83,7 @@ parseCommandLine( int argc, const char ** argv )
         {
             case 'm': magnetFlag = true; break;
             case 's': scrapeFlag = true; break;
+            case 'u': unsorted = true; break;
             case 'V': showVersion = true; break;
             case TR_OPT_UNK: filename = optarg; break;
             default: return 1;
@@ -171,7 +174,10 @@ showInfo( const tr_info * inf )
     files = tr_new( tr_file*, inf->fileCount );
     for( i=0; i<(int)inf->fileCount; ++i )
         files[i] = &inf->files[i];
-    qsort( files, inf->fileCount, sizeof(tr_file*), compare_files_by_name );
+    if (!unsorted)
+    {
+        qsort( files, inf->fileCount, sizeof(tr_file*), compare_files_by_name );
+    }
     for( i=0; i<(int)inf->fileCount; ++i )
         printf( "  %s (%s)\n", files[i]->name, tr_formatter_size_B( buf, files[i]->length, sizeof( buf ) ) );
     tr_free( files );

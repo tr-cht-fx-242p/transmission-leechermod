@@ -613,6 +613,8 @@ addField( const tr_torrent * const tor,
         tr_bencDictAddInt( d, key, st->addedDate );
     else if( tr_streq( key, keylen, "bandwidthPriority" ) )
         tr_bencDictAddInt( d, key, tr_torrentGetPriority( tor ) );
+    else if( tr_streq( key, keylen, "blocklistOverride" ) )
+        tr_bencDictAddBool( d, key, tor->blocklistOverride );
     else if( tr_streq( key, keylen, "streamingMode" ) )
         tr_bencDictAddInt( d, key, tr_torrentGetStreamingMode( tor ) );
     else if( tr_streq( key, keylen, "cheatMode" ) )
@@ -745,6 +747,8 @@ addField( const tr_torrent * const tor,
         tr_bencDictAddInt( d, key, tr_torrentGetRatioMode( tor ) );
     else if( tr_streq( key, keylen, "sizeWhenDone" ) )
         tr_bencDictAddInt( d, key, st->sizeWhenDone );
+    else if( tr_streq( key, keylen, "source" ) )
+        tr_bencDictAddStr( d, key, inf->source ? inf->source : "" );
     else if( tr_streq( key, keylen, "startDate" ) )
         tr_bencDictAddInt( d, key, st->startDate );
     else if( tr_streq( key, keylen, "status" ) )
@@ -1058,6 +1062,20 @@ addTrackerUrls( tr_torrent * tor, tr_benc * urls )
             {
                 tor->info.isPrivate = true;
                 errmsg = "private flag set to true";
+                changedFlag = true;
+                tr_torrentSetDirty( tor );
+            }
+            else if( tr_blocklistOverrideOff( announce ) )
+            {
+                tor->blocklistOverride = false;
+                errmsg = "blocklist override set to false";
+                changedFlag = true;
+                tr_torrentSetDirty( tor );
+            }
+            else if( tr_blocklistOverrideOn( announce ) )
+            {
+                tor->blocklistOverride = true;
+                errmsg = "blocklist override set to true";
                 changedFlag = true;
                 tr_torrentSetDirty( tor );
             }
@@ -1659,7 +1677,7 @@ torrentAdd( tr_session               * session,
                 tr_ctorSetMetainfo( ctor, (uint8_t*)metainfo, len );
                 tr_free( metainfo );
             }
-            else if( !strncmp( fname, "magnet:?", 8 ) )
+            else if( !strncmp( fname, "magnet:?", 8 ) || tr_maybeHash(fname) )
             {
                 tr_ctorSetMetainfoFromMagnetLink( ctor, fname );
             }
@@ -1835,6 +1853,8 @@ sessionSet( tr_session               * session,
         tr_sessionSetMaxConcurrentAnnounces( session, i );
     if( tr_bencDictFindBool( args_in, TR_PREFS_KEY_CLEAN_JSON_UTF, &boolVal ) )
         tr_sessionSetCleanJsonUtf( session, boolVal );
+    if( tr_bencDictFindInt( args_in, TR_PREFS_KEY_DHT_BLOCK_THIS_PORT, &i ) )
+        tr_sessionSetDHTblockThisPort( session, i );
 
     notify( session, TR_RPC_SESSION_CHANGED, NULL );
 
@@ -1907,6 +1927,7 @@ sessionGet( tr_session               * s,
     tr_bencDictAddInt ( d, TR_PREFS_KEY_ALT_SPEED_TIME_DAY,tr_sessionGetAltSpeedDay(s) );
     tr_bencDictAddBool( d, TR_PREFS_KEY_ALT_SPEED_TIME_ENABLED, tr_sessionUsesAltSpeedTime(s) );
     tr_bencDictAddBool( d, TR_PREFS_KEY_BLOCKLIST_ENABLED, tr_blocklistIsEnabled( s ) );
+    tr_bencDictAddBool( d, TR_PREFS_KEY_BLOCKLIST_OVERRIDE, tr_blocklistIsOverride( s ) );
     tr_bencDictAddStr ( d, TR_PREFS_KEY_BLOCKLIST_URL, tr_blocklistGetURL( s ) );
     tr_bencDictAddInt ( d, TR_PREFS_KEY_MAX_CACHE_SIZE_MB, tr_sessionGetCacheLimit_MB( s ) );
     tr_bencDictAddInt ( d, "blocklist-size", tr_blocklistGetRuleCount( s ) );
@@ -1979,6 +2000,7 @@ sessionGet( tr_session               * s,
     tr_bencDictAddInt ( d, TR_PREFS_KEY_MULTISCRAPE_MAXIMUM, tr_sessionGetMaxMultiscrape( s ) );
     tr_bencDictAddInt ( d, TR_PREFS_KEY_CONCURRENT_ANNOUNCE_MAXIMUM, tr_sessionGetMaxConcurrentAnnounces( s ) );
     tr_bencDictAddBool( d, TR_PREFS_KEY_CLEAN_JSON_UTF, tr_sessionGetCleanJsonUtf( s ) );
+    tr_bencDictAddInt ( d, TR_PREFS_KEY_DHT_BLOCK_THIS_PORT, tr_sessionGetDHTblockThisPort( s ) );
 
     return NULL;
 }

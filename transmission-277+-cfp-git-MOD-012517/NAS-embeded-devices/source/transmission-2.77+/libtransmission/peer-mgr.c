@@ -1685,6 +1685,9 @@ peerCallbackFunc( tr_peer * peer, const tr_peer_event * e, void * vt )
 
     assert( peer != NULL );
 
+    if( e->pieceIndex == 1 )
+        tr_tordbg( t->tor, "Callback %s piece index: %u", tr_atomAddrStr( peer->atom ), e->pieceIndex );
+
     switch( e->eventType )
     {
         case TR_PEER_PEER_GOT_DATA:
@@ -1739,11 +1742,17 @@ peerCallbackFunc( tr_peer * peer, const tr_peer_event * e, void * vt )
 
         case TR_PEER_CLIENT_GOT_REJ: {
             tr_block_index_t b = _tr_block( t->tor, e->pieceIndex, e->offset );
+
+            if( peer->atom ) //do not show dead webseeds
+                tr_tordbg( t->tor, "Peer %s sent a reject message", tr_atomAddrStr( peer->atom ) );
+
             if( b < t->tor->blockCount )
                 removeRequestFromTables( t, b, peer );
-            else
+            else {
+                tr_tordbg( t->tor, "Peer %s sent an out-of-range reject message", tr_atomAddrStr( peer->atom ) );
                 tordbg( t, "Peer %s sent an out-of-range reject message",
                            tr_atomAddrStr( peer->atom ) );
+            }
             break;
         }
 
@@ -1893,11 +1902,14 @@ peerCallbackFunc( tr_peer * peer, const tr_peer_event * e, void * vt )
             {
                 /* some protocol error from the peer */
                 peer->doPurge = 1;
+                tr_tordbg( t->tor, "setting %s doPurge flag - reason is error %d - %s",
+                                       tr_atomAddrStr( peer->atom ), e->err, tr_strerror( e->err ) );
                 tordbg( t, "setting %s doPurge flag because we got an ERANGE, EMSGSIZE, or ENOTCONN error",
                         tr_atomAddrStr( peer->atom ) );
             }
             else
             {
+                tr_tordbg( t->tor, "unhandled %s error: %d - %s", tr_atomAddrStr( peer->atom ), e->err, tr_strerror( e->err ) );
                 tordbg( t, "unhandled error: %s", tr_strerror( e->err ) );
             }
             break;
@@ -2169,7 +2181,22 @@ tr_peerMgrAddPex( tr_torrent * tor, uint8_t from,
         if( !tr_sessionIsAddressBlocked( t->manager->session, &pex->addr ) )
         {
             if( tr_address_is_valid_for_peers( t->manager->session, &pex->addr, pex->port ) )
-                ensureAtomExists( t, &pex->addr, pex->port, pex->flags, seedProbability, from );
+                {
+                if( ( from == TR_PEER_FROM_DHT ) &&
+                              ( pex->port == htons( t->manager->session->dhtBlockThisPort ) ) )
+                     {
+                     tr_tordbg( tor, "Blocked DHT port %d", ntohs( pex->port ) );
+                     tr_tordbg( tor, "pex peer DHT candidate %s dropped.", tr_address_to_string( &pex->addr ) );
+                     printf( "transmission: %s -- Blocked DHT port %d \n", tor->info.name, ntohs( pex->port ) );
+                     printf( "transmission: %s -- pex peer DHT candidate %s dropped. \n",
+                                    tor->info.name, tr_address_to_string( &pex->addr ) );
+                     fflush( stdout );
+
+                     }    
+                else {
+                     ensureAtomExists( t, &pex->addr, pex->port, pex->flags, seedProbability, from );
+                     }
+                }
         }
         else {
              tr_tordbg( tor, "Blocklisted IP %s dropped as pex peer candidate", tr_address_to_string( &pex->addr ) );

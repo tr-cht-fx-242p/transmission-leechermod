@@ -112,6 +112,7 @@ struct tr_session
     bool                         isUTPEnabled;
     bool                         isLPDEnabled;
     bool                         isBlocklistEnabled;
+    bool                         isBlocklistOverride;
     bool                         isPrefetchEnabled;
     bool                         isTorrentAddedScriptEnabled;
     bool                         isTorrentDoneScriptEnabled;
@@ -139,6 +140,7 @@ struct tr_session
     int                          maxRedirect;
     int                          maxMultiscrape;
     int                          maxConcurrentAnnounces;
+    tr_port                      dhtBlockThisPort;
 
     tr_benc                      removedTorrents;
 

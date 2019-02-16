@@ -261,6 +261,7 @@ static int parse_message(const unsigned char *buf, int buflen,
                          unsigned char *info_hash_return,
                          unsigned char *target_return,
                          unsigned short *port_return,
+                         int *implied_port_return,
                          unsigned char *token_return, int *token_len,
                          unsigned char *nodes_return, int *nodes_len,
                          unsigned char *nodes6_return, int *nodes6_len,
@@ -269,11 +270,6 @@ static int parse_message(const unsigned char *buf, int buflen,
                          int *want_return);
 
 static const unsigned char zeroes[20] = {0};
-static const unsigned char ones[20] = {
-    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-    0xFF, 0xFF, 0xFF, 0xFF
-};
 static const unsigned char v4prefix[16] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0, 0, 0, 0
 };
@@ -317,6 +313,13 @@ static time_t token_bucket_time;
 static int token_bucket_tokens;
 
 FILE *dht_debug = NULL;
+FILE *port_filter = NULL;
+
+unsigned short blocked_port;
+static int port_differs_count = 0;
+static int announce_count = 0;
+static int both_port_count = 0;
+
 
 #ifdef __GNUC__
     __attribute__ ((format (printf, 1, 2)))
@@ -329,6 +332,16 @@ debugf(const char *format, ...)
     vfprintf(dht_debug, format, args);
     va_end(args);
     fflush(dht_debug);
+}
+
+static void
+port_filterf(const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    vfprintf(port_filter, format, args);
+    va_end(args);
+    fflush(port_filter);
 }
 
 static void
@@ -1564,7 +1577,7 @@ dht_dump_tables(FILE *f)
             if(n->pinged)
                 fprintf(f, " (%d)", n->pinged);
             fprintf(f, "%s%s.\n",
-                    find_node(n->id, AF_INET) ? " (known)" : "",
+                    find_node(n->id, sr->af) ? " (known)" : "",
                     n->replied ? " (replied)" : "");
         }
         sr = sr->next;
@@ -1611,6 +1624,12 @@ dht_init(int s, int s6, const unsigned char *id, const unsigned char *v)
 
     storage = NULL;
     numstorage = 0;
+
+    if(dht_debug)
+        debugf("(TR_DHT_VERBOSE) setting TR_DHT_BLOCK_THIS_PORT is %d.\n", blocked_port);
+    else
+        if(port_filter)
+            port_filterf("(TR_DHT_PORT_FILTER) setting TR_DHT_BLOCK_THIS_PORT is %d%s", blocked_port, ".\n");
 
     if(s >= 0) {
         buckets = calloc(sizeof(struct bucket), 1);
@@ -1879,6 +1898,7 @@ dht_periodic(const void *buf, size_t buflen,
         int tid_len = 16, token_len = 128;
         int nodes_len = 26*16, nodes6_len = 38*16;
         unsigned short port;
+        int implied_port;
         unsigned char values[2048], values6[2048];
         int values_len = 2048, values6_len = 2048;
         int want;
@@ -1899,7 +1919,7 @@ dht_periodic(const void *buf, size_t buflen,
         }
 
         message = parse_message(buf, buflen, tid, &tid_len, id, info_hash,
-                                target, &port, token, &token_len,
+                                target, &port, &implied_port, token, &token_len,
                                 nodes, &nodes_len, nodes6, &nodes6_len,
                                 values, &values_len, values6, &values6_len,
                                 &want);
@@ -2091,6 +2111,7 @@ dht_periodic(const void *buf, size_t buflen,
             }
             break;
         case ANNOUNCE_PEER:
+            if(dht_debug || port_filter) ++announce_count;
             if(dht_debug) debugf("Announce peer!\n");
             new_node(id, from, fromlen, 1);
             if(id_cmp(info_hash, zeroes) == 0) {
@@ -2105,12 +2126,63 @@ dht_periodic(const void *buf, size_t buflen,
                            203, "Announce_peer with wrong token");
                 break;
             }
+            unsigned short port_temp = port;
+            if(implied_port != 0) {
+                if(port != 0) {
+                    if(dht_debug || port_filter) ++both_port_count;
+                    if(dht_debug) debugf("Both port (%d) and implied_port.\n", ntohs(port));
+                    /* But continue, that's what the spec says. */
+                }
+                switch(from->sa_family) {
+                case AF_INET:
+                    port = htons(((struct sockaddr_in*)from)->sin_port);
+                    if(dht_debug) debugf("Announce_peer: AF_INET implied_port %d.\n", ntohs(port));
+                    break;
+                case AF_INET6:
+                    port = htons(((struct sockaddr_in6*)from)->sin6_port);
+                    if(dht_debug) debugf("Announce_peer: AF_INET6 implied_port %d.\n", ntohs(port));
+                    break;
+                default:
+                    port = 0;
+                    if(dht_debug) debugf("Announce_peer: unsupported sa_family! implied port set zero.\n");
+                    break;
+                }
+            }
+
+            if((dht_debug || port_filter) && port_temp && (port_temp != port)) {
+                ++port_differs_count;
+                if(dht_debug) {
+                    debugf("port (%d) not equal to implied port (%d) differs count = %d.\n",
+                            ntohs(port_temp), ntohs(port), port_differs_count);
+                    debugf("Total announce count = %d.\n", announce_count);
+                    debugf("Both port count = %d.\n", both_port_count);
+                }
+                else if(port_filter) {
+                    port_filterf("port (%d) not equal to implied port (%d) differs count = %d.\n",
+                            ntohs(port_temp), ntohs(port), port_differs_count);
+                    port_filterf("Total announce count = %d.\n", announce_count);
+                    port_filterf("Both port count = %d.\n", both_port_count);
+                }
+            }
+
             if(port == 0) {
                 if(dht_debug) debugf("Announce_peer with forbidden port %d.\n", port);
                 send_error(from, fromlen, tid, tid_len,
                            203, "Announce_peer with forbidden port number");
                 break;
             }
+
+            if(port == htons(blocked_port)) {
+                if(dht_debug) debugf("Blocked port %d (environment setting TR_DHT_BLOCK_THIS_PORT).\n",
+                                            ntohs(port));
+                else if(port_filter) port_filterf("Blocked port %d (environment setting TR_DHT_BLOCK_THIS_PORT).\n",
+                                            ntohs(port));
+                send_error(from, fromlen, tid, tid_len,
+                           203, "Announce_peer with forbidden port number");
+                port = 0;
+                break;
+            }
+
             storage_store(info_hash, from, port);
             /* Note that if storage_store failed, we lie to the requestor.
                This is to prevent them from backtracking, and hence
@@ -2281,12 +2353,12 @@ dht_insert_node(const unsigned char *id, struct sockaddr *sa, int salen)
         return -1;
     }
 
-    n = new_node(id, (struct sockaddr*)sa, salen, 0);
+    n = new_node(id, sa, salen, 0);
     return !!n;
 }
 
 int
-dht_ping_node(struct sockaddr *sa, int salen)
+dht_ping_node(const struct sockaddr *sa, int salen)
 {
     unsigned char tid[4];
 
@@ -2733,6 +2805,7 @@ parse_message(const unsigned char *buf, int buflen,
               unsigned char *tid_return, int *tid_len,
               unsigned char *id_return, unsigned char *info_hash_return,
               unsigned char *target_return, unsigned short *port_return,
+              int *implied_port_return,
               unsigned char *token_return, int *token_len,
               unsigned char *nodes_return, int *nodes_len,
               unsigned char *nodes6_return, int *nodes6_len,
@@ -2784,17 +2857,30 @@ parse_message(const unsigned char *buf, int buflen,
         }
     }
     if(port_return) {
-        p = dht_memmem(buf, buflen, "porti", 5);
+        p = dht_memmem(buf, buflen, "4:porti", 7);
         if(p) {
             long l;
             char *q;
-            l = strtol((char*)p + 5, &q, 10);
+            l = strtol((char*)p + 7, &q, 10);
             if(q && *q == 'e' && l > 0 && l < 0x10000)
                 *port_return = l;
             else
                 *port_return = 0;
         } else
             *port_return = 0;
+    }
+    if(implied_port_return) {
+        p = dht_memmem(buf, buflen, "12:implied_porti", 16);
+        if(p) {
+            long l;
+            char *q;
+            l = strtol((char*)p + 16, &q, 10);
+            if(q && *q == 'e' && l > 0 && l < 0x10000)
+                *implied_port_return = l;
+            else
+                *implied_port_return = 0;
+        } else
+            *implied_port_return = 0;
     }
     if(target_return) {
         p = dht_memmem(buf, buflen, "6:target20:", 11);

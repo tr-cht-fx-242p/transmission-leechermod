@@ -395,6 +395,10 @@ bool tr_str_has_suffix( const char *str, const char *suffix );
 const char* tr_memmem( const char * haystack, size_t haystack_len,
                        const char * needle, size_t needle_len );
 
+/** @brief Case insensitive  memmem() pseudo */
+const char* tr_memmemcase( const char * haystack, size_t haystack_len,
+                       const char * needle, size_t needle_len );
+
 /** @brief Portability wrapper for strsep() that uses the system implementation if available */
 char* tr_strsep( char ** str, const char * delim );
 
@@ -417,6 +421,10 @@ bool tr_urlIsValidTracker( const char * url ) TR_GNUC_NONNULL(1);
 bool tr_privateTrackerOff( const char * url ) TR_GNUC_NONNULL(1);
 
 bool tr_privateTrackerOn( const char * url ) TR_GNUC_NONNULL(1);
+
+bool tr_blocklistOverrideOff( const char * url ) TR_GNUC_NONNULL(1);
+
+bool tr_blocklistOverrideOn( const char * url ) TR_GNUC_NONNULL(1);
 
 /** @brief return true if the url is a [ http, https, ftp, ftps ] url that Transmission understands */
 bool tr_urlIsValid( const char * url, int url_len ) TR_GNUC_NONNULL(1);

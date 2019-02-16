@@ -123,6 +123,20 @@ writeFunc( void * ptr, size_t size, size_t nmemb, void * vtask )
     if (task->torrentId != -1)
         {
 	    tr_torrent * tor = tr_torrentFindFromId (task->session, task->torrentId);
+        if( task->is_blocklisted == 99 )
+            {
+            if( !tor )
+                tr_dbg( "?unknown? torrent - MAX WAIT FACTOR cancelled webseed %p's buffer write - old ID was %d - ",
+				         task, task->torrentId );
+            else
+                tr_tordbg( tor, " - MAX WAIT FACTOR cancelled webseed %p's buffer write - ", task );
+
+            if( task->tracker_addr )
+                tr_dbg( "connection closed - MAX WAIT FACTOR cancelled Webseed IP:%s - torrent ID was %d - ",
+                        task->tracker_addr, task->torrentId );
+            return byteCount + 1;
+            }
+
         if (tor && tor->isRunning && !tor->isStopping && !tr_torrentIsSeed( tor ))
             {
 
@@ -200,6 +214,9 @@ progress_callback_func( void * vtask, double dltotal, double dlnow,
 {
     struct tr_web_task * task = vtask;
     tr_torrent * wsTor = NULL;
+    if( ( (int)ulnow > CURLE_OK ) && ( (int)ulnow < CURL_LAST ) )
+        tr_dbg( "CURLcode error %d ", (int)ulnow );
+
     if( task->torrentId != -1 ) {
         wsTor = tr_torrentFindFromId( task->session, task->torrentId );
         if( !wsTor ) {
@@ -226,7 +243,17 @@ progress_callback_func( void * vtask, double dltotal, double dlnow,
         else
             tr_tordbg( wsTor, "Torrent paused - Webseed disconnected - IP: ???unknown???" );
         if( task->tracker_addr && task->is_blocklisted )
-            tr_tordbg( wsTor, "Webseed in BLOCKLIST- IP:%s connection closed by user pausing torrent", task->tracker_addr );
+            tr_tordbg( wsTor, "Webseed in BLOCKLIST %d - IP:%s connection closed by user pausing torrent",
+                             task->is_blocklisted, task->tracker_addr );
+        return 1;
+    }
+
+    if( task->is_blocklisted == 99 ) {
+        tr_dbg( "MAX WAIT FACTOR cancelled webseed - progress test %d - ", (int)ulnow );
+        if( task->tracker_addr )
+            tr_tordbg( wsTor, "Webseed IP:%s connection closed - MAX WAIT FACTOR cancelled webseed", task->tracker_addr );
+        else
+            tr_tordbg( wsTor, "MAX WAIT FACTOR cancelled webseed - Webseed disconnected - IP: ???unknown???" );
         return 1;
     }
 
@@ -252,6 +279,8 @@ createEasy( tr_session * s, struct tr_web * web, struct tr_web_task * task )
             curl_easy_setopt( e, CURLOPT_PROGRESSDATA, task );
             curl_easy_setopt( e, CURLOPT_NOPROGRESS, 0L );
         }
+        else
+            curl_easy_setopt( e, CURLOPT_HTTP_CONTENT_DECODING, 0L );
     }
 
     curl_easy_setopt( e, CURLOPT_AUTOREFERER, 1L );
@@ -259,7 +288,10 @@ createEasy( tr_session * s, struct tr_web * web, struct tr_web_task * task )
     if (web->cookie_filename != NULL)
     curl_easy_setopt( e, CURLOPT_COOKIEFILE, web->cookie_filename );
 
-    curl_easy_setopt( e, CURLOPT_ENCODING, "gzip;q=1.0, deflate, identity" );
+    curl_easy_setopt( e, CURLOPT_ENCODING, "" );
+//    Set compression to what curl was built with
+//    https://github.com/transmission/transmission/pull/495
+
     curl_easy_setopt( e, CURLOPT_FOLLOWLOCATION, 1L );
     curl_easy_setopt( e, CURLOPT_MAXREDIRS, (long)s->maxRedirect );
     curl_easy_setopt( e, CURLOPT_NOSIGNAL, 1L );
@@ -539,7 +571,6 @@ tr_webThreadFunc( void * vsession )
                 curl_easy_getinfo( e, CURLINFO_PRIVATE, (void*)&task );
                 curl_easy_getinfo( e, CURLINFO_RESPONSE_CODE, &task->code );
 
-
                 task->is_blocklisted = 0;
                 tr_address_from_string( &addr, "0.0.0.0" );
 
@@ -570,8 +601,30 @@ tr_webThreadFunc( void * vsession )
 
 
 /*fprintf( stderr, "removing a completed task.. taskCount is now %d (response code: %d, response len: %d)\n", taskCount, (int)task->code, (int)evbuffer_get_length(task->response) );*/
-                if( ( progress_callback_func( task, 0, 0, 0, (double)999 ) ) || ( res == CURLE_TOO_MANY_REDIRECTS ) )
-                    task->code = 999L;
+                if( task->freebuf==NULL )
+                {
+                // do this for webseeds only
+                    if( res != CURLE_OK )
+                    {
+                        if( progress_callback_func( task, 0, 0, 0, (double)res ) )
+                            task->code = 997L;
+                    }
+                    else
+                    {
+                        if( progress_callback_func( task, 0, 0, 0, (double)997 ) )
+                            task->code = 997L;
+                    }
+
+                    if( res == CURLE_TOO_MANY_REDIRECTS )
+                        task->code = 999L;
+                    if( res == CURLE_BAD_CONTENT_ENCODING )
+                        task->code = 998L;
+                    if( tr_isSession( task->session ) )
+                        if( task->session->maxWebseedConnectFails >= 999999999 )
+                            if( res != CURLE_OK )
+                                task->code = 996L;
+                }
+
                 tr_runInEventThread( task->session, task_finish_func, task );
                 --taskCount;
             }
@@ -672,6 +725,9 @@ tr_webGetResponseStr( long code )
         case 503: return "Service Unavailable";
         case 504: return "Gateway Timeout";
         case 505: return "HTTP Version Not Supported";
+        case 996: return "CURLcode error";
+        case 997: return "Webseed torrent halt";
+        case 998: return "Webseed server compression error";
         case 999: return "Too many redirects";
         default:  return "Unknown Error";
     }

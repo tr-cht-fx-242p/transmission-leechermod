@@ -175,6 +175,7 @@ const char* tr_getDefaultDownloadGroupDefault (void);
 #define TR_PREFS_KEY_BIND_ADDRESS_IPV4                  "bind-address-ipv4"
 #define TR_PREFS_KEY_BIND_ADDRESS_IPV6                  "bind-address-ipv6"
 #define TR_PREFS_KEY_BLOCKLIST_ENABLED                  "blocklist-enabled"
+#define TR_PREFS_KEY_BLOCKLIST_OVERRIDE                 "blocklist-override"
 #define TR_PREFS_KEY_BLOCKLIST_URL                      "blocklist-url"
 #define TR_PREFS_KEY_BLOCKLIST_WEBSEEDS                 "blocklist-webseeds"
 #define TR_PREFS_KEY_IPV6_ENABLED                       "ipv6-enabled"
@@ -255,6 +256,7 @@ const char* tr_getDefaultDownloadGroupDefault (void);
 #define TR_PREFS_KEY_MULTISCRAPE_MAXIMUM                "multiscrape-maximum"
 #define TR_PREFS_KEY_CONCURRENT_ANNOUNCE_MAXIMUM        "concurrent-announces-maximum"
 #define TR_PREFS_KEY_CLEAN_JSON_UTF                     "clean-json-utf-enabled"
+#define TR_PREFS_KEY_DHT_BLOCK_THIS_PORT                "DHT-block-this-port"
 
 
 /**
@@ -943,6 +945,9 @@ void tr_sessionSetTorrentAddedScript( tr_session *, const char * scriptFilename 
 ***
 **/
 
+void tr_sessionSetDHTblockThisPort( tr_session *, tr_port dhtBlockThisPort );
+tr_port  tr_sessionGetDHTblockThisPort( const tr_session * );
+
 void tr_sessionSetMaxMagnetBadPiece( tr_session *, int maxMagnetBadPiece );
 int  tr_sessionGetMaxMagnetBadPiece( const tr_session * );
 
@@ -1091,7 +1096,12 @@ bool    tr_blocklistExists       ( const tr_session * session );
 
 bool    tr_blocklistIsEnabled    ( const tr_session * session );
 
+bool    tr_blocklistIsOverride   ( const tr_session * session );
+
 void    tr_blocklistSetEnabled   ( tr_session       * session,
+                                   bool               isEnabled );
+
+void    tr_blocklistSetOverride  ( tr_session       * session,
                                    bool               isEnabled );
 
 /** @brief The blocklist that ges updated when an RPC client
@@ -1302,6 +1312,11 @@ void tr_metainfoFree( tr_info * inf );
             TR_EDUPLICATE if there's already a matching torrent object. */
 tr_torrent * tr_torrentNew( const tr_ctor   * ctor,
                             int             * setmeError );
+
+
+/** @brief Check if uri may be interpreted as raw hash */
+bool tr_maybeHash(char const* uri);
+
 
 /** @} */
 
@@ -2022,6 +2037,7 @@ struct tr_info
     char            ** webseeds;
 
     char             * comment;
+    char             * source;
     char             * creator;
     tr_file          * files;
     tr_piece         * pieces;

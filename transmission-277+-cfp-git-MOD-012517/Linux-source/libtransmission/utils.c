@@ -683,6 +683,33 @@ tr_memmem( const char * haystack, size_t haystacklen,
 #endif
 }
 
+const char*
+tr_memmemcase( const char * haystack, size_t haystacklen,
+           const char * needle, size_t needlelen )
+{
+
+    if (needlelen == 0)
+    {
+        return haystack;
+    }
+
+    if (needlelen > haystacklen || haystack == NULL || needle == NULL)
+    {
+        return NULL;
+    }
+
+    for (size_t i = 0; i <= haystacklen - needlelen; ++i)
+    {
+        if (evutil_ascii_strncasecmp(haystack + i, needle, needlelen) == 0)
+        {
+            return haystack + i;
+        }
+    }
+
+    return NULL;
+
+}
+
 char*
 tr_strdup_printf( const char * fmt, ... )
 {
@@ -1006,6 +1033,32 @@ tr_privateTrackerOn( const char * url )
     else
     {
         return !memcmp(url,"privateON",9);
+    }
+}
+
+bool
+tr_blocklistOverrideOff( const char * url )
+{
+    if( ( url == NULL ) || ( strlen( url ) != 20 ) )
+    {
+        return false;
+    }
+    else
+    {
+        return !memcmp(url,"blocklistoverrideOFF",20);
+    }
+}
+
+bool
+tr_blocklistOverrideOn( const char * url )
+{
+    if( ( url == NULL ) || ( strlen( url ) != 19 ) )
+    {
+        return false;
+    }
+    else
+    {
+        return !memcmp(url,"blocklistoverrideON",19);
     }
 }
 
